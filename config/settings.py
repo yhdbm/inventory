@@ -73,20 +73,26 @@ ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver','10.143.91.138'] + [
     h for h in os.environ.get('INVENTORY_ALLOWED_HOSTS', '').split(',') if h]
 
 # --- Railway ----------------------------------------------------------------
-# Railway sets RAILWAY_ENVIRONMENT on every deploy and RAILWAY_PUBLIC_DOMAIN once
-# a public domain is generated. There the app sits behind Railway's TLS proxy, so
-# unlike the LAN install below it IS served over HTTPS: trust the proxy's
-# X-Forwarded-Proto and mark the cookies Secure. Locally none of this applies.
-ON_RAILWAY = bool(os.environ.get('RAILWAY_ENVIRONMENT'))
+# Railway injects RAILWAY_* variables into every deploy. There the app sits
+# behind Railway's TLS proxy, so unlike the LAN install below it IS served over
+# HTTPS: trust the proxy's X-Forwarded-Proto and mark the cookies Secure.
+# Locally none of this applies.
+ON_RAILWAY = any(os.environ.get(v) for v in (
+    'RAILWAY_ENVIRONMENT', 'RAILWAY_ENVIRONMENT_NAME', 'RAILWAY_PROJECT_ID',
+    'RAILWAY_SERVICE_ID'))
 CSRF_TRUSTED_ORIGINS = [
     o for o in os.environ.get('INVENTORY_CSRF_TRUSTED_ORIGINS', '').split(',') if o]
 if ON_RAILWAY:
+    # RAILWAY_PUBLIC_DOMAIN is only present in deploys made AFTER the domain was
+    # generated, so a domain added later would 400 until the next redeploy.
+    # Allowing the whole *.up.railway.app suffix covers that; Railway's edge
+    # routes by Host, so no other app's traffic can reach this service anyway.
+    ALLOWED_HOSTS += ['.up.railway.app', 'healthcheck.railway.app']
+    CSRF_TRUSTED_ORIGINS.append('https://*.up.railway.app')
     _railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN', '')
     if _railway_domain:
         ALLOWED_HOSTS.append(_railway_domain)
         CSRF_TRUSTED_ORIGINS.append(f'https://{_railway_domain}')
-    # The deploy healthcheck comes in with this Host header.
-    ALLOWED_HOSTS.append('healthcheck.railway.app')
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Sessions live in the database. (They used to be signed cookies, on the theory
