@@ -1,0 +1,33 @@
+{% extends "inventory/base.html" %}
+{% block content %}
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h1 style="margin:0;">Reconciliation sessions</h1>
+    <a class="btn" href="{% url 'session_create' %}">+ New session</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if sessions %}
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Asset-tag column</th><th>Expected</th><th>Scanned</th><th>Created</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr>
+        <td><a href="{% url 'session_detail' s.pk %}"><strong>{{ s.name }}</strong></a></td>
+        <td>{{ s.asset_tag_column|default:"—" }}</td>
+        <td>{{ s.expected_items.count }}</td>
+        <td>{{ s.scanned_items.count }}</td>
+        <td class="muted">{{ s.created_at|date:"Y-m-d H:i" }}</td>
+        <td><a href="{% url 'session_detail' s.pk %}">Open →</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No sessions yet. Create one to upload an inventory spreadsheet and start scanning.</p>
+  {% endif %}
+</div>
+{% endblock %}

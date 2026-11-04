@@ -1,0 +1,58 @@
+{% extends "inventory/base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+
+<style>
+  .login-card { max-width: 420px; margin: 40px auto; }
+  .login-card h1 { margin: 0 0 4px; font-size: 22px; }
+  .login-field { margin-bottom: 12px; }
+  .login-field label { display: block; font-size: 11px; font-weight: 600;
+                       text-transform: uppercase; letter-spacing: .02em;
+                       color: var(--muted); margin-bottom: 3px; }
+  .login-field input { width: 100%; padding: 7px 9px; border: 1px solid var(--line);
+                       border-radius: 6px; font-size: 14px; }
+  .login-field input:focus { outline: none; border-color: var(--accent); }
+  .login-err { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b;
+               border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-bottom: 12px; }
+  .login-note { font-size: 12px; color: var(--muted); margin: 14px 0 0; }
+</style>
+
+<div class="card login-card">
+  <h1>Sign in</h1>
+  <p class="muted" style="margin-top:0; font-size:13px;">
+    Browsing and reports are open to everyone — signing in is needed to make changes.
+  </p>
+
+  {% if form.errors %}
+    <div class="login-err">
+      {# Django reports bad credentials as a non-field error. #}
+      {% for err in form.non_field_errors %}{{ err }}{% empty %}
+        Please check the details below.
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="login-field">
+      <label for="{{ form.username.id_for_label }}">Username</label>
+      {{ form.username }}
+      {% for err in form.username.errors %}<div class="login-err">{{ err }}</div>{% endfor %}
+    </div>
+    <div class="login-field">
+      <label for="{{ form.password.id_for_label }}">Password</label>
+      {{ form.password }}
+      {% for err in form.password.errors %}<div class="login-err">{{ err }}</div>{% endfor %}
+    </div>
+    {# Carries the page the write-gate bounced us from, so we return there. #}
+    <input type="hidden" name="next" value="{{ next }}">
+    <button class="btn" type="submit" style="width:100%;">Sign in</button>
+  </form>
+
+  <p class="login-note">
+    No account? Ask an administrator to create one. Note this app is served over
+    plain HTTP on the LAN, so don't reuse a password that matters elsewhere.
+  </p>
+</div>
+
+{% endblock %}

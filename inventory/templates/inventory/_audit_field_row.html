@@ -1,0 +1,28 @@
+<tr data-field="{{ f.field }}">
+  <td class="afld-cell">
+    <div class="fname">{{ f.label }}</div>
+    <div class="afld-vals">
+      <div class="afld-col">
+        <div class="afld-sub">Current</div>
+        <div class="cur" id="cur_{{ f.field }}"></div>
+      </div>
+      <div class="afld-mid">
+        <input type="checkbox" class="same form-check-input" data-field="{{ f.field }}" checked
+               title="Checked = expected mirrors current; uncheck to enter a correction">
+      </div>
+      <div class="afld-col">
+        <div class="afld-sub">Expected</div>
+        <div class="exp-wrap">
+          <input class="exp form-control form-control-sm" data-field="{{ f.field }}"
+                 list="dl_{{ f.field }}" autocomplete="off"
+                 placeholder="Expected {{ f.label|lower }}…">
+          <button type="button" class="copy-btn" data-field="{{ f.field }}"
+                  title="Copy value and uncheck this row">📋</button>
+        </div>
+      </div>
+    </div>
+    <datalist id="dl_{{ f.field }}">
+      {% for o in f.options %}<option value="{{ o }}"></option>{% endfor %}
+    </datalist>
+  </td>
+</tr>

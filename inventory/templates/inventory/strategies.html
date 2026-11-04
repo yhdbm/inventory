@@ -1,0 +1,64 @@
+{% extends "inventory/base.html" %}
+{% block title %}Edit strategies{% endblock %}
+{% block content %}
+
+<style>
+  .strat-table th, .strat-table td { text-align: center; }
+  .strat-table th.fieldcol, .strat-table td.fieldcol { text-align: left; white-space: nowrap; }
+  .strat-table td.checked { background: #dcfce7; }
+  .strat-table input[type=checkbox] { width: 18px; height: 18px; }
+  .name-input { width: 92px; padding: 5px 6px; border: 1px solid var(--line);
+                border-radius: 6px; font-size: 13px; text-align: center; }
+  .placeholder { color: var(--muted); }
+</style>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Field edit strategies</h1>
+    <span class="muted">{{ rows|length }} fields · {{ strategies|length }} strategy columns</span>
+  </div>
+  <p class="muted">
+    Check which strategy is used to set each field in ServiceNow. The unnamed
+    columns (A–E) are placeholders — rename them in the header as new strategies
+    are found while re-valuing cells. The extension will later read this table.
+  </p>
+</div>
+
+<div class="card" style="overflow-x:auto;">
+  <form method="post">
+    {% csrf_token %}
+    <table class="strat-table">
+      <thead>
+        <tr>
+          <th class="fieldcol">Field</th>
+          {% for s in strategies %}
+          <th>
+            <input class="name-input" type="text" name="name_{{ s.id }}" value="{{ s.name }}"
+                   {% if not can_write %}disabled{% endif %}>
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <th class="fieldcol">{{ row.label }}</th>
+          {% for cell in row.cells %}
+          <td class="{% if cell.checked %}checked{% endif %}">
+            <input type="checkbox" name="mark" value="{{ row.field }}:{{ cell.strategy.id }}"
+                   {% if cell.checked %}checked{% endif %}
+                   {% if not can_write %}disabled{% endif %}>
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div style="margin-top:16px;">
+      <button class="btn" type="submit"
+              {% if not can_write %}disabled{% endif %}>Save strategies</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

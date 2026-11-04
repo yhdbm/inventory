@@ -1,0 +1,162 @@
+{% extends "inventory/base.html" %}
+{% block title %}Snapshots{% endblock %}
+{% block content %}
+
+<style>
+  .snap-summary td, .snap-summary th { white-space: nowrap; }
+  .snap-pct { font-weight: 700; }
+  .snap-details { margin-top: 10px; }
+  .snap-cols { display: flex; gap: 24px; flex-wrap: wrap; }
+  .snap-cols > div { flex: 1 1 280px; min-width: 0; }
+  .snap-cols h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase;
+                  letter-spacing: .03em; color: var(--muted); }
+  .snap-cols table { font-size: 13px; }
+  details > summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+  .chk-col { width: 34px; text-align: center; }
+  .chk-col input { cursor: pointer; }
+  .pencil-btn { background: none; border: 0; cursor: pointer; font-size: 13px;
+                padding: 0 4px; opacity: .7; }
+  .pencil-btn:hover { opacity: 1; }
+  .date-edit { display: none; margin-top: 6px; }
+  .date-edit input { padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px;
+                     font-size: 13px; }
+</style>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Snapshots</h1>
+    <span class="muted">{{ snapshots|length }} recorded</span>
+  </div>
+  <p class="muted">Point-in-time totals of the Station report (inventoried vs. pending)
+    and the per-category / Station ID / state breakdowns, with the date the system held them.</p>
+</div>
+
+<div class="card">
+  <h2 style="margin:0 0 4px;">Inventory Over Time</h2>
+  <p class="muted" style="margin:0 0 8px;">Check rows below to plot them; uncheck to remove.</p>
+  <div id="chart"></div>
+</div>
+
+<div class="card" style="overflow-x:auto;">
+  <table class="snap-summary">
+    <thead>
+      <tr>
+        <th class="chk-col"><input type="checkbox" id="snapAll" checked title="Select all"></th>
+        <th>Taken</th><th>Source file</th><th>Total</th>
+        <th>Inventoried</th><th>Pending</th><th>%</th><th>Breakdowns</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in snapshots %}
+      <tr>
+        <td class="chk-col">
+          <input type="checkbox" class="snap-chk" checked
+                 data-date="{{ s.taken_at|date:'c' }}"
+                 data-label="{{ s.taken_at|date:'Y-m-d' }}"
+                 data-pct="{{ s.marked_pct }}">
+        </td>
+        <td>
+          <span>{{ s.taken_at|date:"Y-m-d H:i" }}</span>
+          {% if can_write %}
+            <button type="button" class="pencil-btn" title="Edit date"
+                    onclick="document.getElementById('dateEdit{{ s.pk }}').style.display='block'; this.style.display='none';">✏️</button>
+            <form method="post" action="{% url 'snapshot_edit_date' s.pk %}" id="dateEdit{{ s.pk }}" class="date-edit">
+              {% csrf_token %}
+              <input type="datetime-local" name="taken_at" value="{{ s.taken_at|date:'Y-m-d\TH:i' }}">
+              <button class="btn small" type="submit">Save</button>
+            </form>
+          {% endif %}
+        </td>
+        <td>{{ s.source_filename|default:"—" }}</td>
+        <td>{{ s.total_assets }}</td>
+        <td>{{ s.inventoried }}</td>
+        <td>{{ s.pending }}</td>
+        <td class="snap-pct">{{ s.marked_pct }}%</td>
+        <td>
+          <details>
+            <summary>view</summary>
+            <div class="snap-details snap-cols">
+              <div>
+                <h4>By model category</h4>
+                <table>
+                  {% for c in s.categories %}<tr><td>{{ c.category }}</td>
+                    <td class="muted">{{ c.inventoried }} / {{ c.total }}</td></tr>{% endfor %}
+                </table>
+              </div>
+              <div>
+                <h4>By Station ID</h4>
+                <table>
+                  {% for st in s.stations %}<tr><td>{{ st.station }}</td>
+                    <td class="muted">{{ st.inventoried }} / {{ st.total }}</td></tr>{% endfor %}
+                </table>
+              </div>
+              <div>
+                <h4>By state</h4>
+                <table>
+                  {% for stt in s.states %}<tr><td>{{ stt.state }}</td>
+                    <td class="muted">{{ stt.inventoried }} / {{ stt.total }}</td></tr>{% endfor %}
+                </table>
+              </div>
+            </div>
+          </details>
+        </td>
+        <td><a class="btn secondary small" href="{% url 'snapshot_export' s.pk %}">CSV</a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="9" class="muted">No snapshots yet. Use “Save snapshot” on the Station report.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  // Plot % inventoried over time from the checked rows (vanilla SVG line chart).
+  function drawChart() {
+    var pts = Array.from(document.querySelectorAll('.snap-chk:checked'))
+      .map(function (b) { return { t: new Date(b.dataset.date), pct: +b.dataset.pct, label: b.dataset.label }; })
+      .filter(function (p) { return !isNaN(p.t.getTime()); })
+      .sort(function (a, b) { return a.t - b.t; });
+
+    var host = document.getElementById('chart');
+    if (!pts.length) { host.innerHTML = '<p class="muted">Select one or more snapshots to plot.</p>'; return; }
+
+    var padL = 46, padR = 20, padT = 20, padB = 84, H = 340;
+    var W = Math.max(220, padL + padR + pts.length * 80);  // only as wide as the bars need
+    var x0 = padL, x1 = W - padR, yBot = H - padB, yTop = padT;
+    function Y(p) { return yBot + (yTop - yBot) * (p / 100); }
+
+    var svg = '';
+    for (var g = 0; g <= 100; g += 25) {
+      var yy = Y(g);
+      svg += '<line x1="' + x0 + '" y1="' + yy + '" x2="' + x1 + '" y2="' + yy + '" stroke="#e3e8ee"/>';
+      svg += '<text x="' + (x0 - 8) + '" y="' + (yy + 4) + '" text-anchor="end" font-size="11" fill="#647382">' + g + '%</text>';
+    }
+
+    // Evenly-spaced vertical bars, one per snapshot.
+    var slot = (x1 - x0) / pts.length;
+    var bw = Math.min(slot * 0.6, 54);
+    pts.forEach(function (p, i) {
+      var cx = x0 + slot * (i + 0.5);
+      var top = Y(p.pct);
+      svg += '<rect x="' + (cx - bw / 2) + '" y="' + top + '" width="' + bw + '" height="' + (yBot - top) +
+             '" rx="3" fill="#2563eb"><title>' + p.label + ': ' + p.pct + '%</title></rect>';
+      svg += '<text x="' + cx + '" y="' + (top - 6) + '" text-anchor="middle" font-size="11" fill="#1f2933">' + p.pct + '%</text>';
+      // Vertical date label below the axis.
+      svg += '<text x="' + cx + '" y="' + (yBot + 14) + '" text-anchor="end" font-size="10" fill="#647382" ' +
+             'transform="rotate(-90 ' + cx + ' ' + (yBot + 14) + ')">' + p.label + '</text>';
+    });
+    host.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" ' +
+      'style="width:' + W + 'px; max-width:100%; display:block; margin:0 auto;">' + svg + '</svg>';
+  }
+
+  document.querySelectorAll('.snap-chk').forEach(function (cb) { cb.addEventListener('change', drawChart); });
+  var all = document.getElementById('snapAll');
+  if (all) {
+    all.addEventListener('change', function () {
+      document.querySelectorAll('.snap-chk').forEach(function (cb) { cb.checked = all.checked; });
+      drawChart();
+    });
+  }
+  drawChart();
+</script>
+{% endblock %}

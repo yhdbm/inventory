@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Inventory Corrections</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <header>
+    <h1>📦 Inventory Corrections</h1>
+  </header>
+
+  <div class="wrap">
+    <div class="card toolbar">
+      <div>
+        <label class="lbl">Import corrections CSV</label>
+        <input type="file" id="file" accept=".csv,text/csv">
+      </div>
+      <div class="grow">
+        <label class="lbl">Search</label>
+        <input type="text" id="search" placeholder="asset tag, field, value…">
+      </div>
+      <label class="chk"><input type="checkbox" id="only-changes"> Only changes</label>
+      <button id="open-sn" class="btn" title="Open all unique asset tags in ServiceNow">Open in ServiceNow</button>
+      <button id="copy-sn" class="btn ghost" title="Copy the ServiceNow link">Copy link</button>
+      <button id="clear" class="btn ghost">Clear</button>
+    </div>
+
+    <div id="import-msg" class="import-msg" style="display:none;"></div>
+    <div id="summary" class="summary muted"></div>
+
+    <div class="card">
+      <table id="table">
+        <thead>
+          <tr>
+            <th>Asset tag</th><th>Field</th><th>Current value</th>
+            <th>Expected value</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="empty" class="muted empty">No corrections loaded. Choose a CSV file above.</div>
+    </div>
+  </div>
+
+  <script src="csv-import.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>

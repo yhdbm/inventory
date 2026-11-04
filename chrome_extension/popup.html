@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 280px; font-family: system-ui, Segoe UI, Roboto, sans-serif;
+           margin: 0; padding: 16px; color: #1f2933; }
+    h1 { font-size: 15px; margin: 0 0 6px; }
+    p { font-size: 12px; color: #647382; margin: 0 0 12px; }
+    button { width: 100%; padding: 10px; border: 0; border-radius: 7px;
+             font-size: 13px; cursor: pointer; margin-bottom: 8px; }
+    .primary { background: #16a34a; color: #fff; }
+    .secondary { background: #2563eb; color: #fff; }
+    .ghost { background: #e2e8f0; color: #1f2933; }
+    button:disabled { opacity: .5; cursor: default; }
+    .ver { font-size: 11px; color: #647382; background: #f1f5f9;
+           border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; }
+    .ver b { color: #1f2933; }
+    #status { font-size: 12px; margin-top: 8px; min-height: 16px; }
+    .implabel { display:block; font-size:12px; font-weight:600; color:#647382; margin-bottom:4px; }
+    #import { width:100%; font-size:12px; margin-bottom:12px; }
+    .opts { background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;
+            padding:8px 10px; margin-bottom:12px; }
+    .opts label { display:flex; align-items:center; gap:8px; font-size:12px;
+                  color:#1f2933; margin:4px 0; cursor:pointer; }
+    .opts input { width:auto; margin:0; }
+  </style>
+</head>
+<body>
+  <h1>📦 Inventory Corrections</h1>
+
+  <div class="ver" id="ver">No file imported yet.</div>
+
+  <label for="import" class="implabel">Import corrections CSV</label>
+  <input type="file" id="import" accept=".csv,text/csv">
+
+  <div class="opts">
+    <span class="implabel" style="margin-bottom:6px;">Apply these slow reference fields?</span>
+    <label><input type="checkbox" id="opt-assigned-to" checked> Assigned to</label>
+    <label><input type="checkbox" id="opt-managed-by" checked> Managed by</label>
+  </div>
+
+  <button class="primary" id="apply" disabled>Apply corrections to this page</button>
+  <button class="secondary" id="open-sn" disabled>Open in ServiceNow ↗</button>
+  <button class="ghost" id="open">Open corrections viewer</button>
+  <button class="ghost" id="strategies">Field edit strategies ⚙️</button>
+  <div id="status"></div>
+  <div id="build" style="font-size:10px; color:#94a3b8; margin-top:10px; text-align:center;"></div>
+
+  <script src="strategy-defaults.js"></script>
+  <script src="csv-import.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

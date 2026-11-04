@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ServiceNow AutoPilot</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 14px 14px 28px 14px;
+      width: 360px;
+      background: #f7f7fb;
+      color: #222;
+      position: relative;
+    }
+    h1 { font-size: 18px; margin: 0 0 10px; }
+    label { display: block; margin: 10px 0 6px; font-size: 12px; color: #555; font-weight: 600; }
+    select, button { width: 100%; box-sizing: border-box; border-radius: 10px; font-size: 13px; }
+    select { border: 1px solid #cfd3dc; padding: 10px 12px; background: white; }
+    button { border: none; padding: 10px 12px; cursor: pointer; font-weight: 600; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .buttons { display: grid; gap: 8px; margin-top: 14px; }
+    #runBtn { background: #1f6feb; color: white; }
+    #stopBtn { background: #dc2626; color: white; }
+    #settingsBtn { background: #e5e7eb; color: #111; }
+    .status { margin-top: 10px; min-height: 18px; font-size: 12px; color: #1f2937; line-height: 1.4; white-space: pre-wrap; }
+    .card { margin-top: 10px; background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; }
+    .small { font-size: 12px; color: #555; line-height: 1.45; }
+    ul { margin: 8px 0 0 18px; padding: 0; }
+    li { font-size: 12px; margin: 4px 0; }
+    .yhd-mark {
+      position: absolute;
+      right: 12px;
+      bottom: 8px;
+      font-size: 10px;
+      color: #9ca3af;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>ServiceNow AutoPilot</h1>
+
+  <label for="taskTypeSelect">Task Type</label>
+  <select id="taskTypeSelect">
+    <option value="bulk">Bulk Tasks</option>
+    <option value="surgical">Surgical Tasks</option>
+  </select>
+
+  <label for="projectSelect">Project</label>
+  <select id="projectSelect"></select>
+
+  <div class="buttons">
+    <button id="runBtn">Run Selected Task</button>
+    <button id="stopBtn" disabled>Stop Current Run</button>
+    <button id="settingsBtn">Open Project Settings</button>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <div class="card">
+    <div class="small"><strong>Enabled rules</strong></div>
+    <ul id="rulesList"></ul>
+  </div>
+
+  <div class="card small">
+    Bulk Tasks updates the list view. Surgical Tasks fills the current single-record form.
+  </div>
+
+  <div class="yhd-mark">YHD</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

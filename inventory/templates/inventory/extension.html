@@ -1,0 +1,87 @@
+{% extends "inventory/base.html" %}
+{% block title %}Chrome extension{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Chrome extension</h1>
+    {% if can_write %}
+      <a class="btn" href="{% url 'extension_download' %}">⬇ Download extension (.zip)</a>
+    {% else %}
+      <button class="btn" type="button" disabled
+              title="Unlock with the access code to download">⬇ Download extension (.zip)</button>
+    {% endif %}
+  </div>
+  <p class="muted">
+    The download is zipped from the server on each request, so it's always the
+    current version. It applies the saved corrections onto the ServiceNow asset
+    list (and imports/views the corrections CSV).
+  </p>
+</div>
+
+<div class="card">
+  <h2>Install it (developer / unpacked)</h2>
+  <ol>
+    <li>Click <strong>Download extension (.zip)</strong> above.</li>
+    <li><strong>Unzip</strong> it. You'll get a folder named
+      <code>inventory-corrections-extension</code>.</li>
+    <li>Open <code>chrome://extensions</code> in Chrome (or Edge:
+      <code>edge://extensions</code>).</li>
+    <li>Turn on <strong>Developer mode</strong> (top-right toggle).</li>
+    <li>Click <strong>Load unpacked</strong> and select the unzipped folder.</li>
+    <li>Pin it from the puzzle-piece menu so the icon is always visible.</li>
+  </ol>
+  <p class="muted">
+    To update later: download again, replace the folder contents, then click the
+    <strong>reload ↻</strong> icon on the extension card. (If a ServiceNow tab is
+    open, reload that tab too.)
+  </p>
+</div>
+
+<div class="card">
+  <h2>Use it</h2>
+  <ol>
+    <li>In this app, go to <a href="{% url 'corrections_list' %}">Corrections</a>
+      and click <strong>Export CSV</strong>.</li>
+    <li>Click the extension icon → <strong>Import corrections CSV</strong> (or open
+      the viewer and import there). Importing replaces any previous data.</li>
+    <li>Use <strong>Open corrections viewer</strong> to review the rows and build
+      the ServiceNow list link (<strong>Open in ServiceNow</strong>).</li>
+    <li>On the ServiceNow asset list tab, click the extension icon →
+      <strong>Apply corrections to this page</strong>. It double-clicks each cell,
+      selects/types the expected value and saves. Committed cells turn green.</li>
+    <li><strong>Field edit strategies ⚙️</strong> lets you set how each field is
+      edited (dropdown vs text input).</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h2>Packaging &amp; the Chrome Web Store</h2>
+  <p>“Load unpacked” is the simplest path for internal/developer use. To distribute
+     it as a regular installable extension you have a few options:</p>
+  <ul>
+    <li><strong>Pack as a <code>.crx</code></strong> — on <code>chrome://extensions</code>
+      click <strong>Pack extension</strong>, choose the folder; Chrome produces a
+      <code>.crx</code> + a <code>.pem</code> private key (keep the key to sign
+      future updates). <em>Caveat:</em> modern Chrome blocks installing
+      <code>.crx</code> files dragged in from outside the store for normal users,
+      so this is mainly useful with enterprise policy (below).</li>
+    <li><strong>Chrome Web Store</strong> — register a developer account
+      (one-time $5 fee), upload this same <code>.zip</code>, fill in listing
+      details, and submit for review. You can publish as <strong>Public</strong>,
+      <strong>Unlisted</strong> (install only via direct link), or
+      <strong>Private</strong> (restricted to your Google Workspace org). This is
+      the only way normal users get one-click install + auto-updates.</li>
+    <li><strong>Enterprise force-install</strong> — via Google Admin console
+      (or Windows group policy <code>ExtensionInstallForcelist</code>), IT can
+      auto-install the extension org-wide from the Web Store ID, or from a
+      self-hosted <code>.crx</code> + update manifest XML. Best for rolling it out
+      to a team without the public store.</li>
+  </ul>
+  <p class="muted">
+    Note: this extension needs the host permission for
+    <code>https://your-instance.service-now.com/*</code> (already in its manifest).
+    Web Store review may ask you to justify that permission.
+  </p>
+</div>
+{% endblock %}

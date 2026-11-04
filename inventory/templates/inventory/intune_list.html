@@ -1,0 +1,635 @@
+{% extends "inventory/base.html" %}
+{% load static %}
+{% block title %}Intune{% endblock %}
+{% block content %}
+
+<style>
+  /* Override base.html's centered 1280px cap so this wide table gets more room. */
+  .wrap-inner { max-width: none; }
+  .in-table { font-size: 13px; width: 100%; border-collapse: collapse; }
+  .in-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .in-table td, .in-table th { padding: 8px 10px; vertical-align: middle; text-align: left;
+                                border-bottom: 1px solid var(--line); }
+  .in-card { max-height: 76vh; overflow: auto; }
+  .in-table thead th { position: sticky; top: 0; z-index: 3; background: #eef2f7;
+                       box-shadow: inset 0 -1px 0 var(--line); }
+  .in-table tbody tr:hover { background: #fafbfc; }
+  .in-sep { border-left: 2px solid var(--line); }
+  .lnk-ico { width: 15px; height: 15px; vertical-align: middle; margin-left: 6px; }
+  /* State group header (click to expand its rows). */
+  .in-group > td { cursor: pointer; background: #fafbfc; font-weight: 700; font-size: 14px;
+                   border-top: 2px solid #cbd5e1; }
+  .in-group:hover > td { background: #eef2f7; }
+  .caret { display: inline-block; width: 14px; color: var(--muted); transition: transform .12s ease; }
+  .caret::before { content: "▶"; font-size: 10px; }
+  .in-group.open .caret { transform: rotate(90deg); }
+  .in-row > td { border-bottom: 1px solid var(--line); }
+  .in-count { display: inline-block; min-width: 26px; text-align: center; padding: 1px 8px;
+              border-radius: 999px; background: #eef2f7; border: 1px solid var(--line); font-size: 12px; }
+  .inv-dot { display:inline-block; width:9px; height:9px; border-radius:50%;
+             background:#16a34a; vertical-align:middle; }
+  .dup-user { background: #fee2e2; }
+  .in-row.search-hit > td { background: #fef3c7; }
+  .search-box { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .search-box input[type=text] { max-width: 320px; }
+  .search-msg { color: var(--red); font-size: 13px; display: none; }
+  .search-msg.show { display: inline; }
+  /* Always-visible "Go up" button, pinned bottom-right. */
+  .go-up { position: fixed; right: 20px; bottom: 20px; z-index: 1200; background: var(--accent);
+           color: #fff; border: 0; border-radius: 999px; padding: 10px 16px; font-size: 13px;
+           font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  .go-up:hover { background: #1d4ed8; }
+  /* .fix-btn.assigned carries no color of its own — each person gets a
+     distinct color (inline style, from FixPerson.color) instead of one
+     shared green, so the class is just a hook, not a look. */
+  /* Fix picker modal */
+  .fix-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 2000;
+                 display: flex; align-items: center; justify-content: center; }
+  .fix-box { background: var(--card); border-radius: 12px; padding: 18px; width: min(420px, 92vw);
+             box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+  .fix-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .fix-head button { background: none; border: 0; font-size: 18px; cursor: pointer; color: var(--muted); }
+  .fix-people-list { max-height: 40vh; overflow: auto; margin-bottom: 12px; }
+  .fix-person-row { display: flex; align-items: center; gap: 10px; padding: 7px 6px;
+                    border-radius: 7px; cursor: pointer; }
+  .fix-person-row:hover { background: var(--bg); }
+  .fix-initials-badge { display: inline-flex; align-items: center; justify-content: center;
+                         width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
+                         color: #fff; font-size: 11px; font-weight: 700; flex: none; }
+  .fix-add-section { border-top: 1px solid var(--line); padding-top: 12px; }
+  .fix-cell { display: flex; align-items: center; gap: 6px; }
+  .fix-done-btn { width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line);
+                  background: #fff; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer;
+                  display: inline-flex; align-items: center; justify-content: center; flex: none; padding: 0; }
+  .fix-done-btn.done { background: var(--green); border-color: var(--green); color: #fff; }
+  .fixer-summary-table { border-collapse: collapse; width: auto; min-width: 360px; }
+  .fixer-summary-table th, .fixer-summary-table td { padding: 8px 14px; text-align: left;
+                                                       border-bottom: 1px solid var(--line); font-size: 13px; }
+  /* Re-enrollment guide: numbered step cards, code/screenshot alternating sides. */
+  .guide-card { background: #eff6ff; border: 1px solid #bfdbfe; border-left: 5px solid var(--accent); }
+  .guide-card summary h2 { color: #1e40af; }
+  .guide-card summary::before { color: var(--accent); }
+  .guide-card summary .muted { color: #475569; }
+  .guide-card summary { cursor: pointer; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; list-style: none; }
+  .guide-card summary::-webkit-details-marker { display: none; }
+  .guide-card summary h2 { margin: 0; }
+  .guide-card summary::before { content: "▶"; font-size: 11px; transition: transform .12s ease; }
+  .guide-card details[open] > summary::before { transform: rotate(90deg); }
+  .guide { list-style: none; counter-reset: gstep; max-width: 880px; margin: 18px auto 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+  .g-step { counter-increment: gstep; position: relative; display: grid; align-items: center; gap: 20px;
+            grid-template-columns: auto 1fr; padding: 16px 20px 16px 58px; background: #fafbfc;
+            border: 1px solid var(--line); border-radius: 12px; }
+  .g-step::before { content: counter(gstep); position: absolute; left: 16px; top: 16px; width: 28px; height: 28px;
+                    border-radius: 50%; background: var(--accent); color: #fff; font-size: 13px; font-weight: 700;
+                    display: flex; align-items: center; justify-content: center; }
+  .g-step.g-plain { grid-template-columns: 1fr; }
+  .g-media { display: flex; }
+  .img-l { grid-template-columns: auto 1fr; }
+  .img-r { grid-template-columns: 1fr auto; }
+  .img-l .g-media { grid-column: 1; grid-row: 1; justify-content: flex-start; }
+  .img-l .g-text  { grid-column: 2; grid-row: 1; }
+  .img-r .g-media { grid-column: 2; grid-row: 1; justify-content: flex-end; }
+  .img-r .g-text  { grid-column: 1; grid-row: 1; text-align: right; }
+  .g-media img { height: 180px; max-width: 100%; background: #fff; padding: 10px; border: 1px solid var(--line);
+                 border-radius: 10px; box-shadow: 0 1px 4px rgba(15,23,42,.08); }
+  .g-media a { display: block; }
+  .g-media a img:hover { border-color: var(--accent); }
+  .g-text h3 { margin: 0 0 6px; font-size: 15px; }
+  .g-text p { margin: 0; color: #475569; }
+  .g-text code { display: inline-block; max-width: 100%; margin-top: 4px; padding: 6px 10px; text-align: left;
+                 background: #0f172a; color: #e2e8f0; border-radius: 6px; font-size: 12px; word-break: break-all; }
+  .g-step.g-group { background: #fffbeb; border-color: #fcd34d; }
+  .g-step.g-group::before { background: #d97706; }
+  .g-step.g-group .g-media img { border-color: #fcd34d; }
+  .g-step.g-group code { background: #78350f; color: #fef3c7; }
+  .g-tag { display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 999px; background: #eef2f7;
+           border: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 600; }
+  kbd { padding: 2px 8px; border: 1px solid #cbd5e1; border-bottom-width: 2px; border-radius: 5px; background: #fff;
+        font-size: 12px; font-weight: 600; }
+  @media (max-width: 800px) {
+    .g-step { grid-template-columns: 1fr; }
+    .img-l .g-media, .img-r .g-media, .img-l .g-text, .img-r .g-text { grid-column: 1; grid-row: auto; justify-content: flex-start; text-align: left; }
+  }
+  .intune-export { display:inline-flex; align-items:center; font-size:12px; font-weight:600;
+                   text-decoration:none; color:var(--accent); background:var(--card);
+                   border:1px solid var(--line); border-radius:999px; padding:3px 10px; }
+  .intune-export:hover { border-color:var(--accent); background:#eef6ff; }
+  .fixer-summary-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+</style>
+
+{% if can_write %}
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <h2 style="margin:0;">Intune device source</h2>
+      <a class="intune-export" href="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesMenu/~/allDevices"
+         target="_blank" rel="noopener"
+         title="Open Intune > Devices > All devices, then use Export to download the CSV (as a .zip) to upload below">Get
+        source from Intune &#8599;</a>
+    </div>
+    {% if latest_import %}
+    <span class="muted">
+      Current: <strong>{{ latest_import.filename }}</strong> ·
+      {{ latest_import.row_count }} device(s) ·
+      loaded {{ latest_import.imported_at|date:"Y-m-d H:i" }}
+    </span>
+    {% else %}
+    <span class="muted">No source uploaded yet.</span>
+    {% endif %}
+  </div>
+
+  <form method="post" enctype="multipart/form-data" action="{% url 'intune_list' %}" style="margin-top:14px;"
+        onsubmit="return confirm('Replace ALL current Intune device data with this file? The previous data will be removed.');">
+    {% csrf_token %}
+    <label for="intuneSource">Upload a new Intune "All devices" export as a .zip (replaces the current data)</label>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <input type="file" id="intuneSource" name="source" accept=".zip" required style="flex:1; min-width:260px;">
+      <button class="btn" type="submit">Upload &amp; replace</button>
+    </div>
+    <p class="muted" style="margin:8px 0 0;">Use <strong>Get source from Intune</strong> above to open All devices, export, and upload the downloaded .zip here. The zip must contain exactly one .csv file. Nothing happens until you press the button.</p>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Intune — {{ warehouse.label|default:"all sites" }}</h1>
+    <span class="muted">{{ total }} computer(s) · {{ matched_count }} matched to an Intune device</span>
+  </div>
+  <p class="muted" style="margin:6px 0 0;">
+    {{ warehouse.label|default:"All" }} assets (category Computer / Personal Computer, Mac models excluded), joined
+    to the imported Intune device export by serial number — matched when the asset's serial
+    number appears inside the Intune device name. Grouped by State; click a group to expand it.
+  </p>
+  <div class="search-box">
+    <input type="text" id="intuneSearch" placeholder="Search any field (tag, serial, user, model…)">
+    <button type="button" class="btn small" id="intuneSearchReset">Reset</button>
+    <span class="search-msg" id="intuneSearchMsg"></span>
+  </div>
+</div>
+
+<div class="card in-card" id="intuneCard">
+  <table class="in-table">
+    <thead>
+      <tr>
+        <th>Asset tag</th>
+        <th>Serial number</th>
+        <th>Station ID</th>
+        <th>Name</th>
+        <th>State</th>
+        <th>Location</th>
+        <th>Model</th>
+        <th>Assigned to</th>
+        <th>202606</th>
+        <th class="in-sep">Intune device name</th>
+        <th>Compliance</th>
+        <th>Primary user</th>
+        <th>Last check-in</th>
+        <th>OS version</th>
+        <th>Encrypted</th>
+        <th>Fix</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in state_groups %}
+      <tr class="in-group" data-gi="{{ forloop.counter0 }}">
+        <td colspan="16"><span class="caret"></span>{{ g.state }}
+          <span class="in-count">{{ g.total }} asset{{ g.total|pluralize }}</span>
+          <span class="in-count">{{ g.matched }} in Intune</span>
+        </td>
+      </tr>
+      {% for r in g.rows %}
+      <tr class="in-row" data-gi="{{ forloop.parentloop.counter0 }}" hidden>
+        <td>
+          {% if r.asset_tag %}{{ r.asset_tag }}{% if r.snow_url %}<a href="{{ r.snow_url }}"
+             class="popout" rel="noopener" title="Open in ServiceNow"><img class="lnk-ico"
+             src="{% static 'inventory/snow.jpg' %}" alt="SNOW"></a>{% endif %}{% else %}—{% endif %}
+        </td>
+        <td>{{ r.serial_number|default:"—" }}</td>
+        <td>{{ r.station_id|default:"—" }}</td>
+        <td>{{ r.name|default:"—" }}</td>
+        <td>{{ r.state|default:"—" }}</td>
+        <td>{{ r.location|default:"—" }}</td>
+        <td>{{ r.model|default:"—" }}</td>
+        <td>{{ r.assigned_to|default:"—" }}</td>
+        <td>{% if r.inventory_marked %}<span class="inv-dot" title="Marked for inventory (GL account 202606)"></span>{% endif %}</td>
+        {% if r.match %}
+          <td class="in-sep">
+            {% if r.intune_url %}<a href="{{ r.intune_url }}" class="popout" rel="noopener"
+               title="Open in Intune">{{ r.match.device_name|default:"—" }}</a>
+            {% else %}{{ r.match.device_name|default:"—" }}{% endif %}
+          </td>
+          <td>
+            {% if r.match.compliance == "Compliant" %}
+              <span class="pill match">{{ r.match.compliance }}</span>
+            {% elif r.match.compliance == "Noncompliant" %}
+              <span class="pill missing">{{ r.match.compliance }}</span>
+            {% elif r.match.compliance %}
+              <span class="pill mismatch">{{ r.match.compliance }}</span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td{% if r.duplicate_primary_user %} class="dup-user"{% endif %}>{{ r.match.primary_user_display_name|default:"—" }}</td>
+          <td>{{ r.match.last_check_in|default:"—" }}</td>
+          <td>{{ r.match.os_version|default:"—" }}</td>
+          <td>{{ r.match.encrypted|default:"—" }}</td>
+        {% else %}
+          <td class="in-sep muted" colspan="6">No matching Intune device</td>
+        {% endif %}
+        <td>
+          {% if r.asset_tag %}
+          <div class="fix-cell">
+            <button type="button" class="btn small fix-btn{% if r.fix_initials %} assigned{% endif %}"
+                    data-asset-tag="{{ r.asset_tag }}" data-serial="{{ r.serial_number }}" data-person-id="{{ r.fix_person_id }}"
+                    {% if r.fix_color %}style="background:{{ r.fix_color }}; color:{{ r.fix_text_color }};"{% endif %}
+                    title="Assign fix owner">{{ r.fix_initials|default:"+" }}</button>
+            {% if r.fix_person_id %}
+            <button type="button" class="fix-done-btn{% if r.fix_fixed %} done{% endif %}"
+                    data-asset-tag="{{ r.asset_tag }}"
+                    title="{% if r.fix_fixed %}Fixed {{ r.fix_fixed_at }} — click to unmark{% else %}Mark as fixed{% endif %}"
+                    >{% if r.fix_fixed %}✓{% else %}○{% endif %}</button>
+            {% endif %}
+          </div>
+          {% else %}
+          <span class="muted" title="No asset tag to assign against">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% empty %}
+      <tr><td colspan="16" class="muted">No matching assets found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h2 style="margin:0 0 10px;">Fixers summary</h2>
+  {% if fixer_summary %}
+  <table class="fixer-summary-table">
+    <thead>
+      <tr><th>Fixer</th><th>Assigned</th><th>Fixed</th><th>Remaining</th></tr>
+    </thead>
+    <tbody>
+      {% for fs in fixer_summary %}
+      <tr>
+        <td>
+          <span class="fix-initials-badge" style="background:{{ fs.color }}; color:{{ fs.text_color }};">{{ fs.initials }}</span>
+          {{ fs.name }}
+        </td>
+        <td>{{ fs.assigned_total }}</td>
+        <td>{{ fs.fixed_total }}</td>
+        <td>{{ fs.remaining }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="muted">No one is on the Fix roster yet.</div>
+  {% endif %}
+</div>
+
+{% comment %} Re-enrollment walkthrough, ported from the old IT-Toolkit /intune page. Images live in static/inventory/intune/.
+Each code/screenshot alternates sides (.img-l / .img-r) so two neighbouring codes are never next to each other and can't be scanned by mistake.
+If you add or remove a step with an image, keep the l/r alternation unbroken. {% endcomment %}
+<div class="card guide-card" style="margin-top:16px;">
+  <details>
+    <summary>
+      <h2>Intune re-enrollment steps</h2>
+      <span class="muted">Click to expand · scan or click the code on the highlighted side of each step</span>
+    </summary>
+    <ol class="guide">
+      <li class="g-step img-l">
+        <div class="g-media"><a href="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesWindowsMenu/~/windowsDevices" target="_blank" rel="noopener"><img src="{% static 'inventory/intune/intune.png' %}" alt="Intune Windows devices"></a></div>
+        <div class="g-text"><h3>Delete device from Intune</h3></div>
+      </li>
+      <li class="g-step img-r">
+        <div class="g-media"><a href="https://intune.microsoft.com/#view/Microsoft_Intune_Enrollment/AutopilotDevices.ReactView/filterOnManualRemediationRequired~/false" target="_blank" rel="noopener"><img src="{% static 'inventory/intune/intune_enrollment.png' %}" alt="Autopilot devices"></a></div>
+        <div class="g-text"><h3>Remove device's enrollment</h3></div>
+      </li>
+      <li class="g-step g-plain">
+        <div class="g-text"><h3>Open CMD</h3><p><kbd>Shift</kbd> + <kbd>F10</kbd></p></div>
+      </li>
+      <li class="g-step img-l">
+        <div class="g-media"><img src="{% static 'inventory/intune/a.png' %}" alt="a"></div>
+        <div class="g-text"><h3>Go to Installing PowerShell on Windows <span class="g-tag">a</span></h3>
+          <code>start msedge https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-windows?view=powershell-7.5</code></div>
+      </li>
+      <li class="g-step g-plain">
+        <div class="g-text"><h3>Download the installer</h3><p>Click on the "PowerShell-7.5.2-win-x64.msi" link to download it.</p></div>
+      </li>
+      <li class="g-step img-r">
+        <div class="g-media"><img src="{% static 'inventory/intune/b.png' %}" alt="b"></div>
+        <div class="g-text"><h3>Go back to CMD and run pwsh.exe <span class="g-tag">b</span></h3>
+          <code>"C:\Program Files\PowerShell\7\pwsh.exe"</code></div>
+      </li>
+      <li class="g-step img-l">
+        <div class="g-media"><img src="{% static 'inventory/intune/c.png' %}" alt="c"></div>
+        <div class="g-text"><h3>Net.ServicePointManager <span class="g-tag">c</span></h3>
+          <code>[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12</code></div>
+      </li>
+      <li class="g-step img-r">
+        <div class="g-media"><img src="{% static 'inventory/intune/d.png' %}" alt="d"></div>
+        <div class="g-text"><h3>-ExecutionPolicy Bypass <span class="g-tag">d</span></h3>
+          <code>pwsh.exe -ExecutionPolicy Bypass</code></div>
+      </li>
+      <li class="g-step img-l">
+        <div class="g-media"><img src="{% static 'inventory/intune/c.png' %}" alt="c"></div>
+        <div class="g-text"><h3>Net.ServicePointManager, again <span class="g-tag">c</span></h3>
+          <code>[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12</code></div>
+      </li>
+      <li class="g-step img-r">
+        <div class="g-media"><img src="{% static 'inventory/intune/e.png' %}" alt="e"></div>
+        <div class="g-text"><h3>Autopilot <span class="g-tag">e</span></h3>
+          <code>Install-Script -name Get-WindowsAutopilotInfo -Force</code></div>
+      </li>
+      <li class="g-step img-l">
+        <div class="g-media"><img src="{% static 'inventory/intune/f.png' %}" alt="f"></div>
+        <div class="g-text"><h3>ExecutionPolicy <span class="g-tag">f</span></h3>
+          <code>Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned</code></div>
+      </li>
+      <li class="g-step g-group img-r">
+        <div class="g-media"><img src="{% static 'inventory/intune/WH1-ScreenPrint.png' %}" alt="WH1-ScreenPrint"></div>
+        <div class="g-text"><h3>Group tag: WH1-ScreenPrint</h3></div>
+      </li>
+      <li class="g-step g-group img-l">
+        <div class="g-media"><img src="{% static 'inventory/intune/WH1-OutofScope.png' %}" alt="WH1-OutofScope"></div>
+        <div class="g-text"><h3>Group tag: WH1-OutofScope</h3></div>
+      </li>
+      <li class="g-step g-group img-r">
+        <div class="g-media"><img src="{% static 'inventory/intune/WH1-Shipping.png' %}" alt="WH1-Shipping"></div>
+        <div class="g-text"><h3>Group tag: WH1-Shipping</h3></div>
+      </li>
+      <li class="g-step g-plain g-group">
+        <div class="g-text"><h3>Finish enrollment</h3>
+          <p>Go back to "Please review the License Agreement" → Accept → type <code>Grouptag-SERIALNUMBER</code></p></div>
+      </li>
+    </ol>
+  </details>
+</div>
+
+<button type="button" class="go-up" id="goUpBtn" title="Scroll to top">▲ Go up</button>
+
+<div id="fixModal" class="fix-overlay" hidden>
+  <div class="fix-box">
+    <div class="fix-head"><strong>Assign fix owner</strong>
+      <button type="button" id="fixModalClose" title="Close">✕</button>
+    </div>
+    <div id="fixPeopleList" class="fix-people-list">
+      {% for p in fix_people %}
+      <label class="fix-person-row" data-person-id="{{ p.id }}">
+        <input type="radio" name="fixPerson" value="{{ p.id }}">
+        <span class="fix-initials-badge" style="background:{{ p.color }}; color:{{ p.text_color }};">{{ p.initials }}</span>
+        <span style="flex:1;">{{ p.name }}</span>
+        <span class="in-count fix-count">{{ p.count }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="fix-add-section">
+      <p class="muted" style="margin:0 0 6px;">Add a new person</p>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="fixNewName" placeholder="Name" style="flex:2;">
+        <input type="text" id="fixNewInitials" placeholder="Initials" style="flex:1;">
+        <button type="button" class="btn small" id="fixAddBtn">Add</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const CSRF = "{{ csrf_token }}";
+
+  // Expand/collapse a state group's asset rows.
+  document.querySelectorAll(".in-group").forEach(function (group) {
+    group.addEventListener("click", function () {
+      var gi = group.dataset.gi;
+      var open = group.classList.toggle("open");
+      document.querySelectorAll('.in-row[data-gi="' + gi + '"]').forEach(function (r) {
+        r.hidden = !open;
+      });
+    });
+  });
+
+  // Always-visible "Go up": resets both the page scroll and the table card's
+  // own internal scroll (it scrolls independently, being max-height + overflow:auto).
+  document.getElementById("goUpBtn").addEventListener("click", function () {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    var card = document.getElementById("intuneCard");
+    if (card) card.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  // SNOW / Intune links: open as a real separate browser window (not just
+  // another tab) — passing window features is what makes browsers spawn an
+  // actual window instead of a tab.
+  document.querySelectorAll("a.popout").forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      e.preventDefault();
+      window.open(
+        a.href, "_blank",
+        "noopener,noreferrer,width=1400,height=900,menubar=no,toolbar=no,location=no,status=no"
+      );
+    });
+  });
+
+  // Search across every column (tag, serial, user, model…): shows only the matching row(s)
+  // (not the rest of their State group) and highlights them; shows a
+  // message when nothing matches. "Reset" (and clearing the box) restores
+  // the page to the same fully-collapsed state it's in on first load.
+  const intuneSearch = document.getElementById("intuneSearch");
+  const intuneSearchMsg = document.getElementById("intuneSearchMsg");
+  const intuneSearchReset = document.getElementById("intuneSearchReset");
+
+  function collapseAllGroups() {
+    document.querySelectorAll(".in-group").forEach(function (g) {
+      g.classList.remove("open");
+    });
+    document.querySelectorAll(".in-row").forEach(function (r) {
+      r.hidden = true;
+      r.classList.remove("search-hit");
+    });
+    intuneSearchMsg.classList.remove("show");
+  }
+
+  intuneSearch.addEventListener("input", function () {
+    var query = intuneSearch.value.trim().toLowerCase();
+    collapseAllGroups();
+    if (!query) return;
+    var firstHit = null;
+    document.querySelectorAll(".in-row").forEach(function (row) {
+      if (!row.textContent.toLowerCase().includes(query)) return;
+      row.hidden = false;
+      row.classList.add("search-hit");
+      if (!firstHit) firstHit = row;
+      var group = document.querySelector('.in-group[data-gi="' + row.dataset.gi + '"]');
+      if (group) group.classList.add("open");
+    });
+    if (firstHit) {
+      firstHit.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      intuneSearchMsg.textContent = 'Nothing found matching "' + intuneSearch.value.trim() + '".';
+      intuneSearchMsg.classList.add("show");
+    }
+  });
+
+  intuneSearchReset.addEventListener("click", function () {
+    intuneSearch.value = "";
+    collapseAllGroups();
+    intuneSearch.focus();
+  });
+
+  // --- Fix picker modal: pick one person (radio) to assign as the fix owner
+  //     for an asset; the row's "+" button becomes that person's initials.
+  function escapeHtml(s) {
+    return (s || "").replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  const fixModal = document.getElementById("fixModal");
+  const fixPeopleList = document.getElementById("fixPeopleList");
+  let fixCurrentBtn = null;
+
+  function openFixModal(btn) {
+    fixCurrentBtn = btn;
+    const currentPersonId = btn.dataset.personId || "";
+    fixPeopleList.querySelectorAll('input[type="radio"]').forEach(function (r) {
+      r.checked = r.value === currentPersonId;
+    });
+    fixModal.hidden = false;
+  }
+  function closeFixModal() {
+    fixModal.hidden = true;
+    fixCurrentBtn = null;
+  }
+  document.querySelectorAll(".fix-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () { openFixModal(btn); });
+  });
+  document.getElementById("fixModalClose").addEventListener("click", closeFixModal);
+  fixModal.addEventListener("click", function (e) { if (e.target === fixModal) closeFixModal(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !fixModal.hidden) closeFixModal(); });
+
+  function adjustFixCount(personId, delta) {
+    if (!personId) return;
+    const row = fixPeopleList.querySelector('.fix-person-row[data-person-id="' + personId + '"]');
+    const span = row && row.querySelector(".fix-count");
+    if (!span) return;
+    span.textContent = Math.max(0, (parseInt(span.textContent, 10) || 0) + delta);
+  }
+
+  // --- "Fixed" toggle: a small circular button next to the Fix badge,
+  //     gated by typing the assigned person's initials (a lightweight
+  //     confirmation, not real auth — matches the Fix feature's write-gate
+  //     exemption). Only exists once someone is assigned.
+  function onFixDoneClick() {
+    const btn = this;
+    const isDone = btn.classList.contains("done");
+    const pass = prompt(isDone
+      ? "Enter your initials to un-mark this as fixed:"
+      : "Enter your initials to mark this as fixed:");
+    if (pass === null) return;  // cancelled
+    fetch("{% url 'intune_fix_mark' %}", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+      body: JSON.stringify({ asset_tag: btn.dataset.assetTag, initials: pass }),
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (!data.ok) { alert(data.error || "Could not update."); return; }
+      btn.classList.toggle("done", data.fixed);
+      btn.textContent = data.fixed ? "✓" : "○";
+      btn.title = data.fixed ? ("Fixed " + data.fixed_at + " — click to unmark") : "Mark as fixed";
+    });
+  }
+  document.querySelectorAll(".fix-done-btn").forEach(function (btn) {
+    btn.addEventListener("click", onFixDoneClick);
+  });
+
+  function makeFixDoneBtn(assetTag, fixed, fixedAt) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "fix-done-btn" + (fixed ? " done" : "");
+    b.dataset.assetTag = assetTag;
+    b.textContent = fixed ? "✓" : "○";
+    b.title = fixed ? ("Fixed " + fixedAt + " — click to unmark") : "Mark as fixed";
+    b.addEventListener("click", onFixDoneClick);
+    return b;
+  }
+
+  // Keeps the row's done-button in sync with a fresh assign/clear result:
+  // fixed === null means "just cleared" (remove the button entirely, since
+  // there's no one assigned to confirm a fix anymore).
+  function syncFixDoneBtn(fixBtn, fixed, fixedAt) {
+    const existing = fixBtn.parentElement.querySelector(".fix-done-btn");
+    if (fixed === null) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing) {
+      existing.classList.toggle("done", fixed);
+      existing.textContent = fixed ? "✓" : "○";
+      existing.title = fixed ? ("Fixed " + fixedAt + " — click to unmark") : "Mark as fixed";
+    } else {
+      fixBtn.insertAdjacentElement("afterend", makeFixDoneBtn(fixBtn.dataset.assetTag, fixed, fixedAt));
+    }
+  }
+
+  function assignPerson(personId) {
+    if (!fixCurrentBtn) return;
+    const assetTag = fixCurrentBtn.dataset.assetTag;
+    const serial = fixCurrentBtn.dataset.serial;
+    const oldPersonId = fixCurrentBtn.dataset.personId || "";
+    fetch("{% url 'intune_fix_save' %}", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+      body: JSON.stringify({ asset_tag: assetTag, serial_number: serial, person_id: personId || null }),
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (!data.ok || !fixCurrentBtn) return;
+      if (oldPersonId && oldPersonId !== String(personId || "")) adjustFixCount(oldPersonId, -1);
+      if (personId && personId !== oldPersonId) adjustFixCount(personId, 1);
+      fixCurrentBtn.textContent = data.initials || "+";
+      fixCurrentBtn.dataset.personId = personId || "";
+      fixCurrentBtn.style.background = data.color || "";
+      fixCurrentBtn.style.color = data.text_color || "";
+      fixCurrentBtn.classList.toggle("assigned", !!data.initials);
+      syncFixDoneBtn(fixCurrentBtn, data.cleared ? null : data.fixed, data.fixed_at || "");
+      closeFixModal();
+    });
+  }
+
+  function wirePersonRadio(label) {
+    const radio = label.querySelector('input[type="radio"]');
+    radio.addEventListener("change", function () { assignPerson(radio.value); });
+  }
+  fixPeopleList.querySelectorAll(".fix-person-row").forEach(wirePersonRadio);
+
+  const fixAddBtn = document.getElementById("fixAddBtn");
+  if (fixAddBtn) {
+    fixAddBtn.addEventListener("click", function () {
+      const nameInput = document.getElementById("fixNewName");
+      const initialsInput = document.getElementById("fixNewInitials");
+      const name = nameInput.value.trim();
+      const initials = initialsInput.value.trim();
+      if (!name || !initials) return;
+      fetch("{% url 'intune_fix_person_add' %}", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+        body: JSON.stringify({ name: name, initials: initials }),
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (!data.ok) { alert(data.error || "Could not add person."); return; }
+        const label = document.createElement("label");
+        label.className = "fix-person-row";
+        label.dataset.personId = data.id;
+        label.innerHTML = '<input type="radio" name="fixPerson" value="' + data.id + '">' +
+          '<span class="fix-initials-badge" style="background:' + data.color + '; color:' + data.text_color + ';">' +
+          escapeHtml(data.initials) + "</span>" +
+          '<span style="flex:1;">' + escapeHtml(data.name) + "</span>" +
+          '<span class="in-count fix-count">0</span>';
+        fixPeopleList.appendChild(label);
+        wirePersonRadio(label);
+        nameInput.value = "";
+        initialsInput.value = "";
+      });
+    });
+  }
+</script>
+
+{% endblock %}

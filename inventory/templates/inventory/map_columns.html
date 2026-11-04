@@ -1,0 +1,21 @@
+{% extends "inventory/base.html" %}
+{% block content %}
+<div class="card" style="max-width:560px;">
+  <h1>Map columns — {{ session.name }}</h1>
+  <p class="muted">Detected {{ session.columns|length }} column(s) in the spreadsheet.
+     Choose which one holds the asset tag used to match devices.</p>
+
+  {% if session.columns %}
+  <p class="muted"><strong>Columns:</strong> {{ session.columns|join:", " }}</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button class="btn" type="submit">Import expected items</button>
+    <a class="btn secondary" href="{% url 'session_list' %}">Cancel</a>
+  </form>
+  {% else %}
+  <p class="msg error">No columns were detected. The first row of the sheet should contain headers.</p>
+  <a class="btn secondary" href="{% url 'session_list' %}">Back</a>
+  {% endif %}
+</div>
+{% endblock %}

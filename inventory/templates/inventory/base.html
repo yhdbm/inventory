@@ -1,0 +1,305 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ warehouse.code|default:"Inventory" }} | Inventory Reconciliation{% endblock %}</title>
+  <!-- Tab icon: the 🧩 logo, drawn as an inline SVG (no image file needed). -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
+
+  <!-- Bootstrap (loaded before the app styles so app .card/.btn rules win) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg: #f5f6f8; --card: #fff; --ink: #1f2933; --muted: #647382;
+      --line: #e3e8ee; --accent: #2563eb;
+      --green: #16a34a; --amber: #d97706; --red: #dc2626; --gray: #64748b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           background: var(--bg); color: var(--ink); }
+    .wrap { max-width: none; margin: 0; padding: 24px; }
+    /* Full-width page, but content is centered and only as wide as it needs. */
+    .wrap-inner { max-width: 1280px; margin: 0 auto; }
+    /* Discreet (almost invisible) project-backup button, bottom-right. */
+    .backup-fab { position: fixed; right: 10px; bottom: 10px; z-index: 1500;
+                  opacity: .08; transition: opacity .15s; }
+    .backup-fab:hover { opacity: 1; }
+    @media print {
+      .app-nav, .backup-fab, .msg { display: none !important; }
+      .wrap, .wrap-inner { max-width: none; padding: 0; margin: 0; }
+    }
+    /* Defensive: keep app cards as plain blocks (Bootstrap .card is flex). */
+    .card { display: block; background: var(--card); border: 1px solid var(--line);
+            border-radius: 10px; padding: 20px; margin-bottom: 20px; }
+    h1 { font-size: 22px; margin: 0 0 16px; }
+    h2 { font-size: 17px; margin: 0 0 12px; }
+    a { color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase;
+         letter-spacing: .03em; }
+    .btn { display: inline-block; background: var(--accent); color: #fff; border: 0;
+           padding: 9px 16px; border-radius: 7px; cursor: pointer; text-decoration: none;
+           font-size: 14px; line-height: 1.4; }
+    .btn.secondary { background: #e2e8f0; color: var(--ink); }
+    .btn.danger { background: var(--red); }
+    .btn.small { padding: 5px 10px; font-size: 12px; }
+    .btn:disabled, .btn[disabled] { opacity: .5; cursor: not-allowed; }
+    /* Make the native file picker button look like a .btn */
+    input[type=file]::file-selector-button {
+      background: var(--accent); color: #fff; border: 0; padding: 9px 16px;
+      border-radius: 7px; cursor: pointer; font-size: 14px; margin-right: 12px; }
+    input[type=file]:disabled { opacity: .6; cursor: not-allowed; }
+    input[type=file]:disabled::file-selector-button { opacity: .5; cursor: not-allowed; }
+    form p { margin: 0 0 14px; }
+    label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+    input[type=text], input[type=file], textarea, select {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+      border-radius: 7px; font-size: 14px; }
+    .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px;
+            font-weight: 600; color: #fff; }
+    .pill.match { background: var(--green); }
+    .pill.mismatch { background: var(--amber); }
+    .pill.missing { background: var(--red); }
+    .pill.unexpected { background: var(--gray); }
+    .stats { display: flex; gap: 12px; flex-wrap: wrap; }
+    .stat { flex: 1; min-width: 120px; background: var(--bg); border: 1px solid var(--line);
+            border-radius: 8px; padding: 12px 14px; }
+    .stat .n { font-size: 24px; font-weight: 700; }
+    .stat .l { font-size: 12px; color: var(--muted); }
+    .msg { padding: 10px 14px; border-radius: 7px; margin-bottom: 12px; font-size: 14px; }
+    .msg.success { background: #dcfce7; color: #166534; }
+    .msg.error { background: #fee2e2; color: #991b1b; }
+    .msg.info, .msg.warning { background: #e0f2fe; color: #075985; }
+    .muted { color: var(--muted); }
+    .diff { background: #fef3c7; padding: 1px 4px; border-radius: 4px; }
+    .inline-form { display: inline; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+
+    /* Navbar — single-row dark header (Amazon style).
+       Height is deliberately tight: every element's vertical padding is small
+       enough that the two-line .lock-box stays the tallest item, and the links
+       are padded narrowly enough that all of them plus the right-hand cluster
+       fit on ONE row. If .nav-links ever wraps to a second row the bar doubles
+       in height, so widening anything in here has a real cost. */
+    .app-nav { position: sticky; top: 0; z-index: 1030; }
+    /* min-height sets the bar's height explicitly rather than letting it fall
+       out of whichever child happens to be tallest (the two-line .lock-box).
+       box-sizing is border-box globally, so this IS the finished height. */
+    .nav-bar { background: #131921; display: grid; grid-template-columns: 1fr auto 1fr;
+               align-items: center; gap: 8px; padding: 6px 18px; min-height: 60px; }
+    .nav-bar .navbar-brand { justify-self: start; display: flex; align-items: baseline; gap: 7px;
+               color: #fff; font-weight: 400; font-size: 17px; text-decoration: none;
+               border: 1px solid transparent; border-radius: 8px; padding: 4px 8px;
+               line-height: 1.2; white-space: nowrap; }
+    /* Reads "🧩 Inventory Reconciliation | WH1". The SITE CODE is the emphasized
+       half: it's the one piece of the brand that changes meaning page to page,
+       since every figure on screen is scoped to it. */
+    .nav-bar .navbar-brand .brand-title { font-weight: 400; color: #d9e1e8; }
+    .nav-bar .navbar-brand .brand-site { font-weight: 700; font-size: 20px; color: #fff;
+               letter-spacing: .01em; }
+    .nav-bar .navbar-brand:hover { border-color: #fff; }
+    /* "Inventory Reconciliation |" is ~230px of the row's width budget and says
+       nothing the page title doesn't. Below ~1500px that width is the difference
+       between the links fitting on one row and the bar growing a second row, so
+       it's the first thing to go. The 🧩 and the site code always stay. */
+    @media (max-width: 1500px) {
+      .nav-bar .navbar-brand .brand-title { display: none; }
+    }
+
+    /* Page links — centered in the bar */
+    .nav-links { justify-self: center; display: flex; align-items: center; gap: 1px;
+                 flex-wrap: wrap; justify-content: center; }
+    .nav-links a { color: #fff; text-decoration: none; font-size: 14px; font-weight: 500;
+                   padding: 8px 11px; border: 1px solid transparent; border-radius: 5px;
+                   line-height: 1.25; white-space: nowrap; }
+    .nav-links a:hover { border-color: #fff; }
+    .nav-links a.active { background: var(--accent); border-color: var(--accent); }
+
+    /* Account / lock box (Amazon "account" widget) — right corner */
+    .lock-wrap { justify-self: end; display: flex; align-items: center; gap: 7px; }
+    .lock-form { display: flex; align-items: center; gap: 6px; }
+    .incident-link { background: var(--red); color: #fff; text-decoration: none;
+                      font-size: 13px; font-weight: 600; padding: 8px 13px;
+                      border-radius: 6px; white-space: nowrap; line-height: 1.3; }
+    .incident-link:hover { background: #b91c1c; }
+
+    /* Staff warehouse picker, left of the Create Incident button. Shows only the
+       site CODE — the full name is in the option's title. A visible "Site" label
+       and the full "WH1 — Cedarport Main / Annex" text made this ~230px wide, which
+       squeezed the centre column until the links wrapped and the bar doubled. */
+    .wh-select { width: auto; padding: 6px 8px; border: 1px solid #5a6b7b;
+                 border-radius: 6px; background: #1f2a36; color: #fff;
+                 font-size: 13px; font-weight: 600; line-height: 1.3; }
+
+    /* Brand + hamburger toggle (toggle hidden on wide screens). */
+    .nav-lead { justify-self: start; display: flex; align-items: center; gap: 8px; }
+    .nav-toggle { display: none; background: transparent; color: #fff; cursor: pointer;
+                  border: 1px solid #5a6b7b; border-radius: 6px; padding: 3px 11px;
+                  font-size: 20px; line-height: 1.2; }
+    .nav-toggle:hover { border-color: #fff; }
+
+    /* Narrow screens (e.g. the RF handheld): keep only the brand + ☰ button; the
+       menu and the lock box collapse and expand when the button is tapped. */
+    @media (max-width: 980px) {
+      .nav-bar { grid-template-columns: 1fr; justify-items: stretch; }
+      .nav-lead { justify-self: start; }
+      .nav-bar .navbar-brand { font-size: 16px; }
+      .nav-toggle { display: inline-flex; }
+      .nav-links, .lock-wrap { display: none; justify-self: stretch; }
+      .nav-bar.nav-open .nav-links { display: flex; }
+      .nav-bar.nav-open .lock-wrap { display: flex; justify-content: center; }
+      /* The tight padding above exists to keep the ONE-ROW desktop bar short.
+         Once the menu is expanded on a handheld it's already a vertical list and
+         height is no longer the constraint, so give fingers a real target back. */
+      .nav-bar.nav-open .nav-links { gap: 4px; padding: 4px 0; }
+      .nav-bar.nav-open .nav-links a { padding: 9px 12px; }
+      .nav-bar.nav-open .incident-link,
+      .nav-bar.nav-open .btn-amz,
+      .nav-bar.nav-open .btn-amz-ghost,
+      .nav-bar.nav-open .wh-select { padding: 9px 12px; }
+    }
+    /* Two stacked lines, so this is the bar's tallest element and therefore what
+       sets its height — keep the padding minimal. */
+    .lock-box { display: flex; flex-direction: column; line-height: 1.1; color: #fff;
+                border: 1px solid transparent; border-radius: 8px; padding: 3px 8px; }
+    .lock-box .l1 { font-size: 11px; color: #cfd6dc; white-space: nowrap; }
+    .lock-box .l2 { font-size: 14px; font-weight: 700; white-space: nowrap; }
+    .lock-input { width: 150px; padding: 5px 8px; border: 0; border-radius: 6px;
+                  font-size: 13px; outline: none; }
+    .btn-amz { background: #febd69; color: #0f1111; border: 0; border-radius: 6px;
+               padding: 8px 13px; font-weight: 600; font-size: 13px; cursor: pointer;
+               white-space: nowrap; line-height: 1.3; }
+    .btn-amz:hover { background: #f3a847; }
+    .btn-amz-ghost { background: transparent; color: #fff; border: 1px solid #5a6b7b;
+                     border-radius: 6px; padding: 7px 13px; font-size: 13px; cursor: pointer;
+                     line-height: 1.3; white-space: nowrap; }
+    .btn-amz-ghost:hover { border-color: #fff; }
+  </style>
+</head>
+<body>
+  {% url 'station_report' as u_home %}
+  <header class="app-nav shadow-sm">
+    <div class="nav-bar">
+      <div class="nav-lead">
+        {% comment %}
+          The site code is the brand: every number on every page is scoped to it,
+          so it has to be the first thing you read, not something you infer.
+
+          Use this comment tag for anything spanning more than one line. The
+          hash-brace comment form is SINGLE-LINE ONLY in Django — spread one over
+          two lines and it stops being a comment, so its text renders straight
+          into the navbar and the bar grows a few rows taller.
+        {% endcomment %}
+        <a class="navbar-brand" href="{{ u_home }}">🧩 <span class="brand-title">Inventory Reconciliation |</span> <span class="brand-site">{{ warehouse.code|default:"all sites" }}</span></a>
+        <button type="button" class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false">☰</button>
+      </div>
+      <nav class="nav-links" id="navLinks">
+        {% with url_name=request.resolver_match.url_name %}
+        <a class="{% if url_name == 'station_report' %}active{% endif %}" href="{% url 'station_report' %}">Main report</a>
+        <a class="{% if url_name == 'audit' %}active{% endif %}" href="{% url 'audit' %}">Reconcile</a>
+        <a class="{% if url_name == 'audit_scan' %}active{% endif %}" href="{% url 'audit_scan' %}">Audit</a>
+        <a class="{% if url_name == 'printers_list' %}active{% endif %}" href="{% url 'printers_list' %}">Printers</a>
+        <a class="{% if url_name == 'intune_list' %}active{% endif %}" href="{% url 'intune_list' %}">Intune</a>
+        <a class="{% if url_name == 'impressions_list' %}active{% endif %}" href="{% url 'impressions_list' %}">Impressions</a>
+        <a class="{% if url_name == 'rf_mobiles_list' %}active{% endif %}" href="{% url 'rf_mobiles_list' %}">RF Mobiles</a>
+        <a class="{% if url_name == 'snapshots_list' %}active{% endif %}" href="{% url 'snapshots_list' %}">Snapshots</a>
+        <a class="{% if url_name == 'corrections_list' %}active{% endif %}" href="{% url 'corrections_list' %}">Corrections</a>
+        <a class="{% if url_name == 'snow_helper' %}active{% endif %}" href="{% url 'snow_helper' %}">SNOW Helper</a>
+        {% if user.is_staff %}
+          <a class="{% if url_name == 'extension' %}active{% endif %}" href="{% url 'extension' %}">Extension</a>
+          <a class="{% if url_name == 'access_logs' %}active{% endif %}" href="{% url 'access_logs' %}">Access Log</a>
+          <a href="/admin/">Admin</a>
+        {% endif %}
+        {# Hidden for now — kept here so they can be re-enabled later. #}
+        {% comment %}
+          <a class="{% if url_name == 'asset_list' %}active{% endif %}" href="{% url 'asset_list' %}">Imported assets</a>
+          <a class="{% if url_name == 'strategies' %}active{% endif %}" href="{% url 'strategies' %}">Strategies</a>
+          <a class="{% if url_name == 'session_list' %}active{% endif %}" href="{% url 'session_list' %}">Reconciliation</a>
+        {% endcomment %}
+        {% endwith %}
+      </nav>
+      <div class="lock-wrap">
+        {% comment %}
+          Staff-only warehouse picker. warehouse_options is empty for everyone
+          else, so non-staff never see it and their scope stays pinned to their
+          profile (the switch endpoint re-checks is_staff anyway). Submits on
+          change — no Go button.
+        {% endcomment %}
+        {% if warehouse_options|length > 1 %}
+          <form method="post" action="{% url 'warehouse_switch' %}" class="lock-form">
+            {% csrf_token %}
+            {% comment %}
+              Code only, no visible label: the full site name lives in the title
+              and each option's title, so this stays ~70px instead of ~230px and
+              the nav links keep to one row.
+            {% endcomment %}
+            <select name="code" class="wh-select" onchange="this.form.submit()"
+                    aria-label="Warehouse" title="Viewing {{ warehouse.label }} — switch site">
+              {% for w in warehouse_options %}
+                <option value="{{ w.code }}" title="{{ w.label }}" {% if w.pk == warehouse.pk %}selected{% endif %}>{{ w.code }}</option>
+              {% endfor %}
+            </select>
+            <noscript><button type="submit" class="btn-amz-ghost">Go</button></noscript>
+          </form>
+        {% endif %}
+        <a class="incident-link" href="https://your-instance.service-now.com/acme?id=sc_cat_item&amp;table=sc_cat_item&amp;sys_id=00000000000000000000000000000004&amp;recordUrl=com.glideapp.servicecatalog_cat_item_view.do%3Fv%3D1&amp;sysparm_id=00000000000000000000000000000004" target="_blank" rel="noopener">Create Incident</a>
+        {% if user.is_authenticated %}
+          {# LogoutView is POST-only in modern Django, so this must be a form. #}
+          <form method="post" action="{% url 'logout' %}" class="lock-form">
+            {% csrf_token %}
+            <span class="lock-box">
+              <span class="l1">{{ user.get_username }}</span>
+              <span class="l2">{% if can_write %}🔓 Can edit{% else %}🔒 Read-only{% endif %}</span>
+            </span>
+            <button type="submit" class="btn-amz-ghost">Sign out</button>
+          </form>
+        {% else %}
+          <form method="get" action="{% url 'login' %}" class="lock-form">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <span class="lock-box"><span class="l1">Read-only</span><span class="l2">🔒 Signed out</span></span>
+            <button type="submit" class="btn-amz">Sign in</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="wrap-inner">
+      {% if messages %}
+        {% for message in messages %}
+          <div class="msg {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+  {% if can_write %}
+    <form method="post" action="{% url 'backup_project' %}" class="backup-fab"
+          onsubmit="return confirm('Create a dated project backup .zip outside the project folder?');">
+      {% csrf_token %}
+      <button type="submit" class="btn small secondary" title="Back up the project (zip, dated, saved outside the project)">💾</button>
+    </form>
+  {% endif %}
+
+  <script>
+    // Hamburger: collapse/expand the nav (+ lock box) on narrow screens like the RF handheld.
+    (function () {
+      var btn = document.getElementById('navToggle');
+      var bar = btn && btn.closest('.nav-bar');
+      if (!btn || !bar) return;
+      btn.addEventListener('click', function () {
+        var open = bar.classList.toggle('nav-open');
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

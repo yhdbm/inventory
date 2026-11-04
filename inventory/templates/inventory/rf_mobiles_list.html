@@ -1,0 +1,524 @@
+{% extends "inventory/base.html" %}
+{% load static %}
+{% block title %}RF Mobiles{% endblock %}
+{% block content %}
+
+<style>
+  /* Three same-size donuts, centered and spread across the full width */
+  .rf-donuts { display:flex; justify-content:space-around; align-items:stretch;
+               gap:20px; flex-wrap:wrap; margin-top:14px; }
+  .rf-grp { flex:1 1 0; min-width:300px; border:2px solid var(--line); border-radius:12px; padding:14px; }
+  .rf-grp.g-main { border-color:#16a34a; }
+  .rf-grp.g-station { border-color:#2563eb; }
+  .rf-grp.g-state { border-color:#d97706; }
+  .rf-grp h4 { margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:.03em;
+               color:var(--muted); text-align:center; }
+  .grp-body { display:flex; gap:14px; align-items:center; justify-content:center; }
+  .donut-box { position:relative; width:150px; height:150px; flex:none; }
+  .donut, .bd-donut { width:150px; height:150px; border-radius:50%; position:relative;
+                      -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .donut-hole { position:absolute; inset:42px; background:var(--card); border-radius:50%;
+                display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  .donut-hole .pct { font-size:22px; font-weight:700; line-height:1.1; }
+  .donut-hole .lbl { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+  .bd-center { color:#000; }
+  .bd-center .frac { font-size:17px; font-weight:700; color:#000; white-space:nowrap; }
+  .grp-legend { flex:0 1 auto; max-height:170px; overflow:auto; font-size:12px; }
+  .legend-row { display:flex; align-items:center; gap:8px; margin:4px 0; font-size:13px; }
+  .swatch { display:inline-block; width:13px; height:13px; border-radius:3px; flex:none;
+            -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .bd-leg { display:flex; align-items:flex-start; gap:6px; margin:2px 0; white-space:normal; }
+  .bd-leg .sw { width:11px; height:11px; border-radius:3px; flex:none; margin-top:2px;
+                -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .bd-leg .c { color:#000; margin-left:8px; font-weight:700; }
+
+  /* Two side-by-side compact tables, built for print only. */
+  .print-area { display:none; }
+  .print-mini { width:100%; border-collapse:collapse; font-size:9px; }
+  .print-mini th, .print-mini td { border:1px solid #cbd5e1; padding:2px 4px; text-align:left; }
+  .print-mini th { background:#eef2f7; }
+
+  /* margin:0 so the browser drops its date/URL header & footer; page 1 portrait,
+     page 2 (the table) landscape. */
+  @page { margin: 0; }
+  @page rf-portrait { size: portrait; margin: 0; }
+  @page rf-landscape { size: landscape; margin: 0; }
+
+  /* Print / Save-as-PDF: page 1 = donuts (filling a portrait page), page 2 = two-column table (landscape). */
+  @media print {
+    * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+    .no-print { display:none !important; }
+    .rf-donut-card { page: rf-portrait; page-break-after: always; border:0; padding:12mm 10mm !important; }
+    /* Stack the three donuts vertically and enlarge them to fill the page. */
+    .rf-donuts { flex-direction: column; gap:12mm; margin-top:6mm; }
+    .rf-grp { width:100%; min-width:0; break-inside: avoid; padding:6px 12px; }
+    .donut-box, .donut, .bd-donut { width:210px !important; height:210px !important; }
+    .donut-hole { inset:58px !important; }
+    .donut-hole .pct { font-size:30px; }
+    .bd-center .frac { font-size:26px; }
+    .grp-legend { max-height:none; font-size:11px; }
+    .rf-card { display:none !important; }
+    .print-area { page: rf-landscape; display:flex !important; gap:10px; align-items:flex-start; padding:10mm !important; }
+    .print-area > table { flex:1; }
+  }
+
+  .rf-card { max-height: 72vh; overflow: auto; padding-top: 0; }
+  .rf-table { font-size: 13px; }
+  .rf-table td, .rf-table th { padding: 6px 9px; white-space: nowrap; }
+  .rf-table thead th { position: sticky; top: 0; z-index: 5; background: #e3e8ee;
+                       box-shadow: inset 0 -1px 0 var(--line); cursor: pointer; user-select: none;
+                       color: #000; font-weight: 700; }
+  .rf-table thead th .arr { opacity: .35; font-size: 10px; }
+  .chk-col { text-align: center; width: 36px; }
+  .chk-col input { cursor: pointer; }
+  .rf-cmt-btn { background:none; border:0; cursor:pointer; font-size:15px; opacity:.35; }
+  .rf-cmt-btn.has { opacity:1; }
+  tr.checked-row { background: #e5e7eb !important; }
+  tr.checked-row td { color: #6b7280; }
+  .rf-table.editable .rf-edit { cursor: text; }
+  .rf-table.editable .rf-edit:hover { background: #eef6ff; }
+  .rf-edit input { width: 100%; padding: 3px 6px; border: 1px solid var(--accent); border-radius: 5px; font-size: 13px; }
+  .rf-sid { font-weight: 700; }
+  .lnk-ico { width:16px; height:16px; vertical-align:middle; margin-left:6px; }
+
+  .cmt-overlay { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:2000;
+                 display:flex; align-items:center; justify-content:center; }
+  .cmt-box { background:var(--card); border-radius:12px; padding:18px; width:min(560px,92vw);
+             box-shadow:0 12px 40px rgba(0,0,0,.25); }
+  .cmt-box textarea { width:100%; min-height:120px; padding:10px; border:1px solid var(--line);
+                      border-radius:8px; font-size:14px; }
+</style>
+
+{% if from_snapshot %}
+<div style="background:#fef9c3; border:1px solid #eab308; color:#854d0e; border-radius:8px;
+            padding:10px 14px; margin-bottom:14px; font-size:13px;">
+  📸 <strong>Imported from snapshot</strong> — the data below reflects the saved snapshot for
+  {{ period_label }} (taken {{ snapshot_taken|date:"Y-m-d H:i" }}), not the live month.
+</div>
+{% endif %}
+
+<div class="card rf-donut-card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <div>
+      <h1 style="margin:0;">RF Mobiles — {{ warehouse.label|default:"all sites" }}</h1>
+      <div class="muted" style="font-size:13px; margin-top:2px;">
+        Filters: <strong>Zebra MC930B</strong> · {{ warehouse.label|default:"all sites" }} · excludes Retired ·
+        <strong>{{ period_label }}</strong> · {{ total }} device(s)
+      </div>
+    </div>
+    <div class="no-print" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      {% if snow_url %}
+        <a class="btn secondary small" href="{{ snow_url }}" target="_blank" rel="noopener">Open all in ServiceNow ↗</a>
+      {% endif %}
+      <button class="btn secondary small" type="button" onclick="doPrint()">🖨 Print</button>
+      <button class="btn secondary small" type="button" onclick="doPrint()">⬇ Save as PDF</button>
+      <form method="post" action="{% url 'rf_snapshot_save' %}" class="inline-form">
+        {% csrf_token %}
+        <input type="hidden" name="period" value="{{ period }}">
+        <button class="btn small" type="submit"
+                {% if not can_write %}disabled{% endif %}>📸 Save snapshot</button>
+      </form>
+      <a class="btn secondary small" href="{% url 'rf_snapshots_list' %}">History ({{ snapshot_count }})</a>
+      {% if can_write %}
+      <form method="post" action="{% url 'rf_asset_add' %}" class="inline-form">
+        {% csrf_token %}
+        <input type="hidden" name="period" value="{{ period }}">
+        <button class="btn small" type="submit">＋ Add RF mobile</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  <div class="no-print" style="margin-top:10px;">
+    <label class="muted" style="font-size:13px;">Month:
+      <select id="monthSel" style="padding:5px 8px; border:1px solid var(--line); border-radius:6px; font-size:13px;">
+        {% for mo in months %}<option value="{{ mo.value }}" {% if mo.value == period %}selected{% endif %}>{{ mo.label }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="rf-donuts">
+    <div class="rf-grp g-main">
+      <h4>Audit progress</h4>
+      <div class="grp-body">
+        <div class="donut-box">
+          <div class="donut" id="donut"></div>
+          <div class="donut-hole"><span class="pct" id="donutPct">0%</span><span class="lbl">checked</span></div>
+        </div>
+        <div class="grp-legend">
+          <div class="legend-row"><span class="swatch" style="background:var(--green);"></span>
+            Checked: <strong id="legChecked">0</strong></div>
+          <div class="legend-row"><span class="swatch" style="background:#cbd5e1;"></span>
+            Missing at Audit: <strong id="legMissing">0</strong></div>
+        </div>
+      </div>
+    </div>
+    <div class="rf-grp g-station">
+      <h4>By Station ID</h4>
+      <div class="grp-body">
+        <div class="donut-box">
+          <div class="bd-donut" id="stationDonut"></div>
+          <div class="donut-hole bd-center">
+            <span class="frac"><span id="stationFound">0</span> / <span id="stationTot">0</span></span>
+          </div>
+        </div>
+        <div class="grp-legend" id="stationLegend"></div>
+      </div>
+    </div>
+    <div class="rf-grp g-state">
+      <h4>By state</h4>
+      <div class="grp-body">
+        <div class="donut-box">
+          <div class="bd-donut" id="stateDonut"></div>
+          <div class="donut-hole bd-center">
+            <span class="frac"><span id="stateFound">0</span> / <span id="stateTot">0</span></span>
+          </div>
+        </div>
+        <div class="grp-legend" id="stateLegend"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card rf-card">
+  <table class="rf-table {% if can_write %}editable{% endif %}">
+    <thead>
+      <tr>
+        <th class="chk-col" data-sort="chk">✓</th>
+        <th class="chk-col col-noprint">💬</th>
+        <th data-sort="text">Station ID <span class="arr"></span></th>
+        <th data-sort="text">Asset tag <span class="arr"></span></th>
+        <th data-sort="text">Name <span class="arr"></span></th>
+        <th data-sort="text">State <span class="arr"></span></th>
+        {% if can_write %}
+        <th class="col-extra" data-sort="text">Display name <span class="arr"></span></th>
+        <th class="col-extra" data-sort="text">Model category <span class="arr"></span></th>
+        <th class="col-extra" data-sort="text">Model <span class="arr"></span></th>
+        <th class="col-extra" data-sort="text">GL account <span class="arr"></span></th>
+        <th class="col-extra" data-sort="text">Checked at <span class="arr"></span></th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in mobiles %}
+      <tr data-asset="{{ m.pk }}" data-station="{{ m.station_id }}" data-state="{{ m.state }}"
+          data-tag="{{ m.asset_tag }}" {% if m.checked %}class="checked-row"{% endif %}>
+        <td class="chk-col">
+          <input type="checkbox" class="rf-chk" {% if m.checked %}checked{% endif %}
+                 {% if not can_write %}disabled{% endif %}>
+        </td>
+        <td class="chk-col col-noprint">
+          <button type="button" class="rf-cmt-btn{% if m.comment %} has{% endif %}" title="Monthly comment">💬</button>
+          <span class="rf-cmt-full" hidden>{{ m.comment }}</span>
+        </td>
+        <td class="rf-edit rf-sid" data-field="station_id" data-val="{{ m.station_id }}">{{ m.station_id|default:"—" }}</td>
+        <td class="rf-edit rf-tag" data-field="asset_tag" data-val="{{ m.asset_tag }}">
+          {% if m.asset_tag %}{{ m.asset_tag }}<a href="{{ m.snow_url }}" target="_blank" rel="noopener" title="Open in ServiceNow"><img class="lnk-ico" src="{% static 'inventory/snow.jpg' %}" alt="SNOW"></a><a href="{{ m.soti_url }}" target="_blank" rel="noopener" title="Open in SOTI"><img class="lnk-ico" src="{% static 'inventory/soti.svg' %}" alt="SOTI"></a>{% else %}—{% endif %}
+        </td>
+        <td class="rf-edit" data-field="name" data-val="{{ m.name }}">{{ m.name|default:"—" }}</td>
+        <td class="rf-edit" data-field="state" data-val="{{ m.state }}">{{ m.state|default:"—" }}</td>
+        {% if can_write %}
+        <td class="col-extra rf-edit" data-field="display_name" data-val="{{ m.display_name }}">{{ m.display_name|default:"—" }}</td>
+        <td class="col-extra rf-edit" data-field="model_category" data-val="{{ m.model_category }}">{{ m.model_category|default:"—" }}</td>
+        <td class="col-extra rf-edit" data-field="model" data-val="{{ m.model }}">{{ m.model|default:"—" }}</td>
+        <td class="col-extra rf-edit" data-field="gl_account" data-val="{{ m.gl_account }}">{{ m.gl_account|default:"—" }}</td>
+        <td class="col-extra rf-when">{{ m.checked_at|default:"—" }}</td>
+        {% endif %}
+      </tr>
+      {% empty %}
+      <tr><td colspan="{% if can_write %}11{% else %}6{% endif %}" class="muted">No RF mobiles found for {{ warehouse.label|default:"this site" }}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="print-area" id="printArea"></div>
+
+<div id="cmtModal" class="cmt-overlay" hidden>
+  <div class="cmt-box">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <strong id="cmtTitle">Comment</strong>
+      <button type="button" id="cmtClose" style="background:none;border:0;font-size:18px;cursor:pointer;color:var(--muted);">✕</button>
+    </div>
+    <div class="muted" style="font-size:12px; margin-bottom:8px;">{{ period_label }}</div>
+    <textarea id="cmtText" {% if not can_write %}readonly{% endif %}
+              placeholder="Add a note for this device this month…"></textarea>
+    <div style="margin-top:10px; text-align:right;">
+      <button type="button" class="btn small" id="cmtSave"
+              {% if not can_write %}disabled{% endif %}>Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const CSRF = "{{ csrf_token }}";
+  const CHECK_URL = "{% url 'rf_mobile_check' %}";
+  const CMT_URL = "{% url 'rf_mobile_comment' %}";
+  const ASSET_URL = "{% url 'rf_asset_update' %}";
+  const SN_BASE = "https://your-instance.service-now.com/now/nav/ui/classic/params/target/";
+  const SNOW_ICON = "{% static 'inventory/snow.jpg' %}";
+  const SOTI_ICON = "{% static 'inventory/soti.svg' %}";
+  const PERIOD = "{{ period }}";
+  const LOCKED = {{ can_write|yesno:"false,true" }};
+  const TOTAL = {{ total }};
+  const tbody = document.querySelector(".rf-table tbody");
+  const PALETTE = ["#2563eb","#16a34a","#d97706","#dc2626","#7c3aed","#0891b2","#db2777",
+                   "#65a30d","#475569","#ea580c","#0d9488","#9333ea","#ca8a04","#4f46e5"];
+
+  function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  const stationLabel = tr => (tr.dataset.station || '').trim() || '(no Station ID)';
+  const stateLabel = tr => (tr.dataset.state || '').trim() || '(no state)';
+
+  // Month dropdown -> reload for that month.
+  const monthSel = document.getElementById("monthSel");
+  if (monthSel) monthSel.addEventListener("change", function () {
+    window.location = "?month=" + encodeURIComponent(this.value);
+  });
+
+  // Stable color per label (so colors don't jump as counts change).
+  function buildColorMap(getLabel) {
+    const labels = [];
+    tbody.querySelectorAll("tr[data-asset]").forEach(function (tr) {
+      const l = getLabel(tr); if (labels.indexOf(l) < 0) labels.push(l);
+    });
+    labels.sort();
+    const map = {};
+    labels.forEach(function (l, i) { map[l] = PALETTE[i % PALETTE.length]; });
+    return map;
+  }
+  const stationColors = buildColorMap(stationLabel);
+  const stateColors = buildColorMap(stateLabel);
+
+  // Row coloring by Station ID.
+  function paintRows() {
+    tbody.querySelectorAll("tr[data-asset]").forEach(function (tr) {
+      let h = 0; const s = tr.dataset.station || "";
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      tr.style.background = "hsl(" + (h % 360) + ", 65%, 92%)";
+    });
+  }
+
+  function tally() {
+    let checked = 0; const byS = {}, byT = {};
+    tbody.querySelectorAll("tr[data-asset]").forEach(function (tr) {
+      if (tr.querySelector(".rf-chk").checked) {
+        checked++;
+        const s = stationLabel(tr); byS[s] = (byS[s] || 0) + 1;
+        const t = stateLabel(tr); byT[t] = (byT[t] || 0) + 1;
+      }
+    });
+    return { checked: checked, byS: byS, byT: byT };
+  }
+  function renderMain(checked) {
+    const pct = TOTAL ? Math.round(checked / TOTAL * 100) : 0;
+    document.getElementById("donut").style.background =
+      "conic-gradient(var(--green) 0 " + pct + "%, #cbd5e1 " + pct + "% 100%)";
+    document.getElementById("donutPct").textContent = pct + "%";
+    document.getElementById("legChecked").textContent = checked;
+    document.getElementById("legMissing").textContent = TOTAL - checked;
+  }
+  function renderBreak(byMap, donutEl, legendEl, colorMap, center) {
+    const labels = Object.keys(byMap).filter(function (l) { return byMap[l] > 0; })
+      .sort(function (a, b) { return byMap[b] - byMap[a]; });
+    let acc = 0, parts = [], leg = "", checkedSum = 0;
+    labels.forEach(function (l) {
+      const pct = TOTAL ? byMap[l] / TOTAL * 100 : 0;
+      const col = colorMap[l] || "#94a3b8";
+      parts.push(col + " " + acc + "% " + (acc + pct) + "%"); acc += pct; checkedSum += byMap[l];
+      leg += '<div class="bd-leg"><span class="sw" style="background:' + col + '"></span>' +
+        esc(l) + '<span class="c">' + byMap[l] + '</span></div>';
+    });
+    const missing = TOTAL - checkedSum;
+    if (missing > 0) {
+      const pct = TOTAL ? missing / TOTAL * 100 : 0;
+      parts.push("#cbd5e1 " + acc + "% " + (acc + pct) + "%");
+      leg += '<div class="bd-leg"><span class="sw" style="background:#cbd5e1"></span>Missing<span class="c">' + missing + '</span></div>';
+    }
+    donutEl.style.background = parts.length ? "conic-gradient(" + parts.join(", ") + ")" : "#cbd5e1";
+    legendEl.innerHTML = leg || '<div class="muted">No data.</div>';
+    // Center: checked over total expected (e.g. 24 / 52), bold black.
+    if (center) {
+      center.found.textContent = checkedSum;
+      center.tot.textContent = TOTAL;
+    }
+  }
+  function center(p) {
+    return { found: document.getElementById(p + "Found"), tot: document.getElementById(p + "Tot") };
+  }
+  function updateAll() {
+    const c = tally();
+    renderMain(c.checked);
+    renderBreak(c.byS, document.getElementById("stationDonut"), document.getElementById("stationLegend"), stationColors, center("station"));
+    renderBreak(c.byT, document.getElementById("stateDonut"), document.getElementById("stateLegend"), stateColors, center("state"));
+  }
+
+  // --- Toggle + persist (unlocked only) ---
+  tbody.addEventListener("change", function (e) {
+    if (!e.target.classList.contains("rf-chk")) return;
+    if (LOCKED) { e.target.checked = !e.target.checked; return; }
+    const cb = e.target, tr = cb.closest("tr"), want = cb.checked;
+    cb.disabled = true;
+    fetch(CHECK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+      body: JSON.stringify({ asset_id: tr.dataset.asset, checked: want, period: PERIOD }),
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data.ok) {
+        tr.classList.toggle("checked-row", data.checked);
+        const w = tr.querySelector(".rf-when");
+        if (w) w.textContent = data.checked ? data.checked_at : "—";
+      } else { cb.checked = !want; }
+    }).catch(function () { cb.checked = !want; })
+      .finally(function () { cb.disabled = false; updateAll(); });
+  });
+
+  // --- Comments modal ---
+  let cmtTr = null;
+  const cmtModal = document.getElementById("cmtModal");
+  const cmtText = document.getElementById("cmtText");
+  function openCmt(tr) {
+    cmtTr = tr;
+    const full = tr.querySelector(".rf-cmt-full");
+    cmtText.value = full ? full.textContent : "";
+    document.getElementById("cmtTitle").textContent = "Comment — " + (tr.dataset.tag || "");
+    cmtModal.hidden = false;
+    if (!LOCKED) cmtText.focus();
+  }
+  function closeCmt() { cmtModal.hidden = true; cmtTr = null; }
+  tbody.addEventListener("click", function (e) {
+    const b = e.target.closest(".rf-cmt-btn");
+    if (b) openCmt(b.closest("tr"));
+  });
+  document.getElementById("cmtClose").addEventListener("click", closeCmt);
+  cmtModal.addEventListener("click", function (e) { if (e.target === cmtModal) closeCmt(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeCmt(); });
+  document.getElementById("cmtSave").addEventListener("click", function () {
+    if (LOCKED || !cmtTr) return;
+    const tr = cmtTr, text = cmtText.value.trim();
+    fetch(CMT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+      body: JSON.stringify({ asset_id: tr.dataset.asset, period: PERIOD, text: text }),
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data.ok) {
+        const full = tr.querySelector(".rf-cmt-full"); if (full) full.textContent = data.text;
+        const btn = tr.querySelector(".rf-cmt-btn"); if (btn) btn.classList.toggle("has", !!data.text);
+        closeCmt();
+      }
+    });
+  });
+
+  // --- Inline editing of live Asset fields (unlocked only) ---
+  function snowAssetUrl(tag) {
+    const inner = encodeURIComponent("asset_tag=" + tag);
+    const target = encodeURIComponent("alm_asset_list.do?sysparm_query=" + inner + "&sysparm_first_row=1&sysparm_view=");
+    return SN_BASE + target;
+  }
+  function sotiUrl(tag) {
+    return "https://s104630.mobicontrolcloud.com/MobiControl/WebConsole/home/dashboard/devices?search=Text%20AlmostEqual%20%22" +
+      encodeURIComponent(tag) + "%22";
+  }
+  function renderEdit(td) {
+    const v = td.dataset.val || "";
+    if (td.classList.contains("rf-tag")) {
+      td.innerHTML = v
+        ? esc(v) +
+          '<a href="' + snowAssetUrl(v) + '" target="_blank" rel="noopener" title="Open in ServiceNow"><img class="lnk-ico" src="' + SNOW_ICON + '" alt="SNOW"></a>' +
+          '<a href="' + sotiUrl(v) + '" target="_blank" rel="noopener" title="Open in SOTI"><img class="lnk-ico" src="' + SOTI_ICON + '" alt="SOTI"></a>'
+        : "—";
+    } else {
+      td.textContent = v || "—";
+    }
+  }
+  function saveField(td, nv) {
+    const tr = td.closest("tr"), field = td.dataset.field;
+    fetch(ASSET_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+      body: JSON.stringify({ asset_id: tr.dataset.asset, field: field, value: nv }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) {
+        td.dataset.val = d.value;
+        renderEdit(td);
+        if (field === "station_id") tr.dataset.station = d.value;
+        if (field === "state") tr.dataset.state = d.value;
+        updateAll();
+      } else { renderEdit(td); }
+    }).catch(function () { renderEdit(td); });
+  }
+  function startEdit(td) {
+    if (td.querySelector("input")) return;
+    const inp = document.createElement("input");
+    inp.value = td.dataset.val || "";
+    td.innerHTML = "";
+    td.appendChild(inp);
+    inp.focus(); inp.select();
+    inp.addEventListener("blur", function () { saveField(td, inp.value.trim()); });
+    inp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") { ev.preventDefault(); inp.blur(); }
+      else if (ev.key === "Escape") { renderEdit(td); }
+    });
+  }
+  if (!LOCKED) {
+    tbody.addEventListener("dblclick", function (e) {
+      const td = e.target.closest(".rf-edit");
+      if (td) startEdit(td);
+    });
+  }
+
+  // --- Click-to-sort ---
+  let sortCol = -1, sortAsc = true;
+  document.querySelectorAll(".rf-table thead th").forEach(function (th, idx) {
+    th.addEventListener("click", function () {
+      const kind = th.dataset.sort;
+      if (!kind) return;  // non-sortable columns (e.g. comment)
+      sortAsc = sortCol === idx ? !sortAsc : true;
+      sortCol = idx;
+      const rows = Array.prototype.slice.call(tbody.querySelectorAll("tr[data-asset]"));
+      rows.sort(function (a, b) {
+        let va, vb;
+        if (kind === "chk") {
+          va = a.querySelector(".rf-chk").checked ? 1 : 0;
+          vb = b.querySelector(".rf-chk").checked ? 1 : 0;
+        } else {
+          va = (a.children[idx].textContent || "").trim().toLowerCase();
+          vb = (b.children[idx].textContent || "").trim().toLowerCase();
+        }
+        if (va < vb) return sortAsc ? -1 : 1;
+        if (va > vb) return sortAsc ? 1 : -1;
+        return 0;
+      });
+      rows.forEach(function (r) { tbody.appendChild(r); });
+      document.querySelectorAll(".rf-table thead th .arr").forEach(function (s) { s.textContent = ""; });
+      const arr = th.querySelector(".arr");
+      if (arr) arr.textContent = sortAsc ? "▲" : "▼";
+    });
+  });
+
+  // --- Build the two-side-by-side compact tables for print/PDF ---
+  function fieldVal(tr, f) {
+    const c = tr.querySelector('[data-field="' + f + '"]');
+    return c ? (c.dataset.val || "") : "";
+  }
+  function miniTable(rows, startIdx) {
+    let h = '<table class="print-mini"><thead><tr><th>#</th><th>Station ID</th>' +
+            '<th>Name</th><th>State</th><th>Asset tag</th></tr></thead><tbody>';
+    rows.forEach(function (tr, i) {
+      h += '<tr><td style="text-align:right">' + (startIdx + i + 1) + '</td><td>' + esc(fieldVal(tr, "station_id")) +
+           '</td><td>' + esc(fieldVal(tr, "name")) + '</td><td>' + esc(fieldVal(tr, "state")) +
+           '</td><td>' + esc(fieldVal(tr, "asset_tag")) + '</td></tr>';
+    });
+    return h + "</tbody></table>";
+  }
+  function buildPrintArea() {
+    const rows = Array.prototype.slice.call(tbody.querySelectorAll("tr[data-asset]"));
+    const half = Math.ceil(rows.length / 2);
+    document.getElementById("printArea").innerHTML =
+      miniTable(rows.slice(0, half), 0) + miniTable(rows.slice(half), half);
+  }
+  window.doPrint = function () { buildPrintArea(); window.print(); };
+  window.addEventListener("beforeprint", buildPrintArea);
+
+  paintRows();
+  updateAll();
+</script>
+{% endblock %}

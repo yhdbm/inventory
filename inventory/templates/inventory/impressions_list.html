@@ -1,0 +1,767 @@
+{% extends "inventory/base.html" %}
+{% load static %}
+{% block title %}Impressions{% endblock %}
+{% block content %}
+
+<style>
+  .imp-head { display:flex; justify-content:space-between; align-items:center;
+              flex-wrap:wrap; gap:10px; }
+  .imp-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .imp-table { width:100%; border-collapse:collapse; margin-top:14px; }
+  .imp-table th, .imp-table td { padding:7px 10px; border-bottom:1px solid var(--line);
+                                 font-size:13px; text-align:left; vertical-align:top; }
+  .imp-table th { color:var(--muted); text-transform:uppercase; letter-spacing:.03em;
+                  font-size:11px; white-space:nowrap; }
+  .imp-table td.num, .imp-table th.num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .imp-table tbody tr:hover { background:#f8fafc; }
+  .imp-imp { font-weight:600; color:#166534; }   /* fresh live read */
+  .imp-pending { color:var(--muted); }
+  .imp-err { color:#991b1b; font-size:12px; font-weight:500; }
+  .imp-noip { color:#b45309; font-size:12px; }
+  /* Last-saved value shown on load / on a failed read — "not recently updated". */
+  .imp-stale { color:#b45309; font-style:italic; font-weight:600; }
+  .imp-stale-note { font-size:11px; color:var(--muted); }
+  .off-imp.off-prefilled { background:#fffbeb; border-color:#f59e0b; }
+  .lnk-ico { width:15px; height:15px; vertical-align:middle; margin-left:6px; }
+  /* Row background by location: WH2 amber, Main/Annex blue. */
+  .imp-table tbody tr.loc-lakeside { background:#fff7ed; }
+  .imp-table tbody tr.loc-mainannex { background:#eef6ff; }
+  .imp-table tbody tr.loc-lakeside:hover { background:#ffedd5; }
+  .imp-table tbody tr.loc-mainannex:hover { background:#dbeafe; }
+  .loc-legend { display:flex; gap:14px; align-items:center; margin-top:10px; font-size:12px; color:var(--muted); }
+  .loc-legend .sw { display:inline-block; width:12px; height:12px; border-radius:3px;
+                    border:1px solid var(--line); vertical-align:middle; margin-right:5px; }
+  .loc-legend .sw.lakeside { background:#fff7ed; }
+  .loc-legend .sw.mainannex { background:#eef6ff; }
+  .imp-table tfoot td { border-top:2px solid var(--line); border-bottom:0; font-weight:700;
+                        font-size:14px; padding-top:10px; }
+  #imp-progress { color:var(--muted); font-size:13px; }
+  .imp-grand-card { background:#f1f5f9; }
+  .imp-grand { display:flex; justify-content:space-between; align-items:center;
+               font-size:15px; font-weight:600; padding:3px 0; }
+  .imp-grand-final { font-size:17px; font-weight:800; margin-top:6px; padding-top:8px;
+                     border-top:2px solid #cbd5e1; }
+  .imp-grand-num { font-variant-numeric:tabular-nums; }
+  #imp-snap-msg { font-size:13px; }
+  /* Amber Save button when the last read had unreachable printers. */
+  #imp-snap.has-errors { background:#f59e0b; border-color:#d97706; color:#1f2937; }
+  /* Warning modal (some printers unreachable). */
+  .imp-warn-overlay { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:2000;
+                      display:flex; align-items:center; justify-content:center; }
+  .imp-warn-overlay[hidden] { display:none; }
+  .imp-warn-box { background:var(--card,#fff); border-radius:12px; padding:20px;
+                  width:min(460px,92vw); box-shadow:0 12px 40px rgba(0,0,0,.25); }
+  .imp-warn-box h3 { margin:0 0 8px; font-size:16px; }
+  .imp-warn-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
+  /* Saved-snapshots management section (collapsed by default). */
+  .imp-manage > summary { cursor:pointer; font-weight:600; font-size:14px; padding:4px 0;
+                          list-style:none; }
+  .imp-manage > summary::-webkit-details-marker { display:none; }
+  .imp-manage > summary::before { content:"▸ "; color:var(--muted); }
+  .imp-manage[open] > summary::before { content:"▾ "; }
+  .snap-table { width:100%; border-collapse:collapse; margin-top:10px; }
+  .snap-table th, .snap-table td { padding:6px 10px; border-bottom:1px solid var(--line);
+                                   font-size:13px; text-align:left; vertical-align:top; }
+  .snap-table th { color:var(--muted); text-transform:uppercase; letter-spacing:.03em; font-size:11px; }
+  .snap-table td.num, .snap-table th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .snap-actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .snap-detail-tbl { margin-top:6px; border-collapse:collapse; }
+  .snap-detail-tbl td { padding:2px 8px; font-size:12px; border-bottom:1px solid var(--line); }
+  .snap-detail-tbl td.num { text-align:right; font-variant-numeric:tabular-nums; }
+</style>
+
+<div class="card">
+  <div class="imp-head">
+    <h1 style="margin:0;">Printer impressions</h1>
+    <div class="imp-actions">
+      <span id="imp-progress"></span>
+      <button class="btn" id="imp-read" type="button">Read all impressions</button>
+      <button class="btn secondary" id="imp-snap" type="button" disabled
+              title="{% if can_write %}Save the read + manually-entered readings{% else %}Unlock to save snapshots{% endif %}">📸 Save snapshot</button>
+    </div>
+  </div>
+  <p class="muted" style="margin:10px 0 0; font-size:13px;">
+    Lifetime total-impression (page count) reading over SNMP for the
+    {{ total }} in-use <strong>LEXMARK / Xerox</strong> printer{{ total|pluralize }} at
+    <strong>{{ warehouse.label|default:"all sites" }}</strong>. Reads happen on demand — click
+    <strong>Read all impressions</strong>. Printers with no IP or that don't answer SNMP are
+    shown but excluded from the total.
+  </p>
+
+  {% if printers %}
+  <table class="imp-table">
+    <thead>
+      <tr>
+        <th>Asset tag</th><th>Serial number</th><th>Service ID</th><th>Area</th>
+        <th>Location</th><th>Name</th><th>Manufacturer</th><th>Model</th><th>IP</th>
+        <th class="num">Total impressions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in printers %}
+        <tr class="{{ p.loc_class }}" data-pk="{{ p.pk }}" data-ip="{{ p.ip }}" data-tag="{{ p.asset_tag }}"
+            data-serial="{{ p.serial_number }}" data-sid="{{ p.service_id }}"
+            data-area="{{ p.area }}" data-manufacturer="{{ p.manufacturer }}" data-model="{{ p.model }}"
+            data-last="{{ p.last_value|default_if_none:'' }}" data-last-taken="{{ p.last_taken }}">
+          <td>
+            {% if p.asset_tag %}{{ p.asset_tag }}{% if p.snow_url %}<a href="{{ p.snow_url }}"
+               target="_blank" rel="noopener" title="Open in ServiceNow"><img class="lnk-ico"
+               src="{% static 'inventory/snow.jpg' %}" alt="SNOW"></a>{% endif %}{% else %}—{% endif %}
+          </td>
+          <td>{{ p.serial_number|default:"—" }}</td>
+          <td>{{ p.service_id|default:"—" }}</td>
+          <td>{{ p.area }}</td>
+          <td>{{ p.location|default:"—" }}</td>
+          <td>{{ p.name|default:"—" }}</td>
+          <td>{{ p.manufacturer|default:"—" }}</td>
+          <td>{{ p.model|default:"—" }}</td>
+          <td>{% if p.ip %}<a href="{{ p.ip_href }}" target="_blank" rel="noopener">{{ p.ip }}</a>{% else %}<span class="imp-noip">no IP</span>{% endif %}</td>
+          <td class="num imp-cell">
+            {% if p.last_value is not None %}
+              <span class="imp-stale" title="Last saved {{ p.last_taken }} — click Read all to refresh">{{ p.last_value_fmt }}</span>
+              <div class="imp-stale-note">last {{ p.last_taken }}</div>
+            {% elif p.ip %}<span class="imp-pending">—</span>{% else %}<span class="imp-noip">—</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="9">Total <span class="muted" id="imp-summary" style="font-weight:400;"></span></td>
+        <td class="num" id="imp-total">—</td>
+      </tr>
+    </tfoot>
+  </table>
+  <div class="loc-legend">
+    <span><span class="sw mainannex"></span>Main / Annex</span>
+    <span><span class="sw lakeside"></span>WH2</span>
+  </div>
+  {% else %}
+    <div class="muted" style="margin-top:14px;">No in-use printers found.</div>
+  {% endif %}
+  <div id="imp-snap-msg" class="muted" style="margin-top:10px;"></div>
+</div>
+
+<div class="card imp-grand-card">
+  <div class="imp-grand">
+    <span>Reachable total <span class="muted" style="font-weight:400;">(live reads)</span></span>
+    <span class="imp-grand-num" id="imp-reachable-total">—</span>
+  </div>
+  <div class="imp-grand">
+    <span>Unreachable total <span class="muted" style="font-weight:400;">(last saved / manual)</span></span>
+    <span class="imp-grand-num" id="imp-unreachable-total">—</span>
+  </div>
+  <div class="imp-grand imp-grand-final">
+    <span>Grand total <span class="muted" style="font-weight:400;">(in use + not in use)</span></span>
+    <span class="imp-grand-num" id="imp-grand-total">—</span>
+  </div>
+</div>
+
+<div class="card">
+  <details class="imp-manage">
+    <summary>Not-in-use LEXMARK / Xerox printers ({{ offline_printers|length }}) — total
+      <span id="off-summary-inline" style="color:#b45309;">—</span></summary>
+    <p class="muted" style="font-size:13px; margin:8px 0 0;">
+      Laser (Xerox / LEXMARK) printers at {{ warehouse.label|default:"all sites" }} whose State is
+      <strong>not “In use”</strong>. Enter a reading manually — printers with a valid IP are
+      prefilled with the <strong>last recorded value</strong> from a past snapshot. Values
+      entered here are added to the grand total and the report when you Save snapshot.
+    </p>
+    {% if offline_printers %}
+    <table class="imp-table">
+      <thead>
+        <tr>
+          <th>Asset tag</th><th>Serial number</th><th>Service ID</th><th>Area</th>
+          <th>Location</th><th>Manufacturer</th><th>Model</th><th>State</th><th>IP</th>
+          <th class="num">Impressions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in offline_printers %}
+          <tr class="off-row {{ p.loc_class }}" data-pk="{{ p.pk }}" data-tag="{{ p.asset_tag }}"
+              data-serial="{{ p.serial_number }}" data-sid="{{ p.service_id }}"
+              data-area="{{ p.area }}" data-manufacturer="{{ p.manufacturer }}" data-model="{{ p.model }}" data-ip="{{ p.ip }}">
+            <td>
+              {% if p.asset_tag %}{{ p.asset_tag }}{% if p.snow_url %}<a href="{{ p.snow_url }}"
+                 target="_blank" rel="noopener" title="Open in ServiceNow"><img class="lnk-ico"
+                 src="{% static 'inventory/snow.jpg' %}" alt="SNOW"></a>{% endif %}{% else %}—{% endif %}
+            </td>
+            <td>{{ p.serial_number|default:"—" }}</td>
+            <td>{{ p.service_id|default:"—" }}</td>
+            <td>{{ p.area }}</td>
+            <td>{{ p.location|default:"—" }}</td>
+            <td>{{ p.manufacturer|default:"—" }}</td>
+            <td>{{ p.model|default:"—" }}</td>
+            <td>{{ p.state|default:"—" }}</td>
+            <td>{% if p.ip %}<a href="{{ p.ip_href }}" target="_blank" rel="noopener">{{ p.ip }}</a>{% else %}<span class="imp-noip">no IP</span>{% endif %}</td>
+            <td class="num">
+              <input type="number" class="off-imp{% if p.prefill != '' %} off-prefilled{% endif %}"
+                     min="0" step="1" value="{{ p.prefill }}"
+                     placeholder="manual" style="width:110px; text-align:right;"
+                     {% if not can_write %}disabled title="Unlock to edit"{% endif %}>
+              {% if p.last_value is not None %}
+                <div class="muted" style="font-size:11px;">last {{ p.last_value_fmt }} · {{ p.last_taken }}</div>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="9">Total <span class="muted" id="off-summary" style="font-weight:400;"></span></td>
+          <td class="num" id="off-subtotal">—</td>
+        </tr>
+      </tfoot>
+    </table>
+    {% else %}
+      <div class="muted" style="margin-top:10px;">No not-in-use Xerox / LEXMARK printers found.</div>
+    {% endif %}
+  </details>
+</div>
+
+<div class="card">
+  <details class="imp-manage">
+    <summary>Saved snapshots ({{ snapshots|length }})</summary>
+    <p class="muted" style="font-size:13px; margin:8px 0 0;">
+      Saved impression readings (each report includes its month). Email options:
+      <strong>✉ Copy styled</strong> copies a Bootstrap-styled report to the clipboard and
+      opens your mail app (paste with Ctrl+V); <strong>⬇ .eml</strong> downloads a styled
+      email file that opens in your mail app with the report already in it;
+      <strong>✉ Plain text</strong> opens your mail app with a spaced, readable text report
+      already in the body.
+      {% if not can_write %}Unlock to delete.{% endif %}
+    </p>
+    {% if snapshots %}
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>Taken</th><th>Month</th><th>Site</th><th class="num">Total impressions</th>
+          <th class="num">Printers</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in snapshots %}
+          <tr>
+            <td>{{ s.taken_at }}</td>
+            <td>{{ s.month_label }}</td>
+            {% comment %}
+              Snapshots taken before the per-site split cover Main/Annex AND
+              WH2 together, so they are flagged rather than mislabelled.
+            {% endcomment %}
+            <td>{% if s.cross_site %}<span class="imp-stale"
+                   title="Taken before the per-site split — covers Main/Annex and WH2 together">{{ s.site_label }}</span>
+                {% else %}{{ s.site_label }}{% endif %}</td>
+            <td class="num">{{ s.total_fmt }}</td>
+            <td class="num">{{ s.count }}</td>
+            <td>
+              <div class="snap-actions">
+                <button type="button" class="btn small" data-email-pk="{{ s.pk }}" data-mode="styled"
+                        title="Copy a Bootstrap-styled report to the clipboard and open your mail app — paste (Ctrl+V) into the body">✉ Copy styled</button>
+                <button type="button" class="btn small secondary" data-email-pk="{{ s.pk }}" data-mode="eml"
+                        title="Download a styled email file (.eml) — open it to compose in your mail app with the report already in it">⬇ .eml</button>
+                <button type="button" class="btn small secondary" data-email-pk="{{ s.pk }}" data-mode="text"
+                        title="Open your mail app with a readable, spaced plain-text report already in the body">✉ Plain text</button>
+                <details>
+                  <summary class="btn small secondary" style="display:inline-block;">view</summary>
+                  <table class="snap-detail-tbl">
+                    <tr><th style="text-align:left;">Asset tag</th><th style="text-align:left;">Serial</th>
+                        <th style="text-align:left;">Service ID</th><th style="text-align:left;">Area</th>
+                        <th style="text-align:left;">Make / Model</th><th style="text-align:left;">IP</th>
+                        <th class="num">Impressions</th></tr>
+                    {% for r in s.readings %}
+                      <tr><td>{{ r.asset_tag|default:"—" }}</td><td>{{ r.serial_number|default:"—" }}</td>
+                          <td>{{ r.service_id|default:"—" }}</td><td>{{ r.area }}</td>
+                          <td>{{ r.make_model|default:"—" }}</td><td>{{ r.ip }}</td>
+                          <td class="num">{{ r.impressions_fmt }}</td></tr>
+                    {% endfor %}
+                  </table>
+                </details>
+                <form method="post" action="{% url 'impression_snapshot_delete' s.pk %}"
+                      class="inline-form" onsubmit="return confirm('Delete this snapshot?');">
+                  {% csrf_token %}
+                  <button class="btn danger small" type="submit"
+                          {% if not can_write %}disabled{% endif %}>Delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <div class="muted" style="margin-top:10px;">No snapshots saved yet.</div>
+    {% endif %}
+  </details>
+  {{ snapshots|json_script:"impSnapData" }}
+</div>
+
+<div id="imp-warn-overlay" class="imp-warn-overlay" hidden>
+  <div class="imp-warn-box">
+    <h3>⚠ Some printers were unreachable</h3>
+    <p id="imp-warn-text" class="muted" style="margin:0;"></p>
+    <div class="imp-warn-actions">
+      <button type="button" class="btn secondary" id="imp-warn-cancel">Cancel</button>
+      <button type="button" class="btn" id="imp-warn-go">Snapshot anyway</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const IMP_URL = "{% url 'impressions_list' %}";  // base; per-printer = IMP_URL + pk + "/"
+  const SNAP_URL = "{% url 'impressions_snapshot_save' %}";
+  const CSRF = "{{ csrf_token }}";
+  const LOCKED = {{ can_write|yesno:"false,true" }};
+  const CONCURRENCY = 8;
+  const $ = function (s) { return document.querySelector(s); };
+
+  function fmt(n) { return Number(n).toLocaleString(); }
+
+  // Readings from the latest "Read all" run, used by the Save-snapshot button.
+  let lastReadings = [];
+  let readOk = {};        // {pk: impressions} for in-use printers read live this session
+  let readFailures = 0;   // unreachable / no-data printers from the last read
+
+  // All in-use table rows (they have an .imp-cell; the not-in-use table shares the
+  // .imp-table class but uses inputs, so it's excluded).
+  function inUseRows() {
+    return Array.prototype.slice.call(document.querySelectorAll('.imp-table tbody tr'))
+      .filter(function (tr) { return !tr.classList.contains('off-row') && tr.querySelector('.imp-cell'); });
+  }
+
+  // Recompute + paint the three totals. Reachable = printers read live; unreachable =
+  // last-saved for in-use printers not read + all not-in-use (manual / last-saved).
+  function recomputeTotals() {
+    let reachable = 0, inUseUnreach = 0;
+    inUseRows().forEach(function (tr) {
+      if (readOk[tr.dataset.pk] !== undefined) { reachable += readOk[tr.dataset.pk]; return; }
+      const raw = (tr.dataset.last || "").trim();
+      if (raw !== "") inUseUnreach += parseInt(raw, 10) || 0;
+    });
+    const offline = offlineReadings().reduce(function (a, r) { return a + r.impressions; }, 0);
+    const unreachable = inUseUnreach + offline;
+    const set = function (sel, v) { const e = $(sel); if (e) e.textContent = fmt(v); };
+    set('#imp-total', reachable + inUseUnreach);      // in-use table footer
+    set('#imp-reachable-total', reachable);
+    set('#imp-unreachable-total', unreachable);
+    set('#imp-grand-total', reachable + unreachable);
+  }
+
+  // Last-saved values for in-use printers NOT read live — included in the snapshot
+  // so unreachable printers still carry their last known value forward.
+  function inUseUnreachableReadings() {
+    const out = [];
+    inUseRows().forEach(function (tr) {
+      if (readOk[tr.dataset.pk] !== undefined) return;   // reachable → already in lastReadings
+      const raw = (tr.dataset.last || "").trim();
+      if (raw === "") return;
+      out.push({
+        asset_tag: tr.dataset.tag || "", serial_number: tr.dataset.serial || "",
+        service_id: tr.dataset.sid || "", area: tr.dataset.area || "",
+        manufacturer: tr.dataset.manufacturer || "", model: tr.dataset.model || "",
+        ip: tr.dataset.ip || "", impressions: parseInt(raw, 10) || 0,
+      });
+    });
+    return out;
+  }
+
+  function rowsToRead() {
+    // Only the in-use table rows have an .imp-cell; exclude the not-in-use
+    // (.off-row) table, which shares the .imp-table class but has inputs instead.
+    return Array.prototype.slice.call(document.querySelectorAll('.imp-table tbody tr'))
+      .filter(function (tr) {
+        return !tr.classList.contains('off-row') && tr.querySelector('.imp-cell') && (tr.dataset.ip || "").trim();
+      });
+  }
+
+  // On a failed read, fall back to the row's last saved value (marked stale) so the
+  // number stays visible; otherwise show "no data".
+  function staleCellHtml(tr, reason) {
+    const raw = (tr.dataset.last || "").trim();
+    if (raw === "") return null;
+    const taken = tr.dataset.lastTaken || "";
+    return '<span class="imp-stale" title="' + reason + ' — showing last saved ' + taken + '">' +
+           fmt(parseInt(raw, 10)) + '</span><div class="imp-stale-note">last ' + taken + ' · not reachable</div>';
+  }
+  async function readOne(tr) {
+    const cell = tr.querySelector('.imp-cell');
+    cell.innerHTML = '<span class="imp-pending">reading…</span>';
+    let reason = "Read failed";
+    try {
+      const r = await fetch(IMP_URL + tr.dataset.pk + "/");
+      const data = await r.json();
+      if (data.ok) {
+        cell.innerHTML = '<span class="imp-imp">' + fmt(data.impressions) + '</span>';
+        return data.impressions;
+      }
+      reason = data.error || "No data";
+    } catch (e) { reason = "Network error"; }
+    cell.innerHTML = staleCellHtml(tr, reason) || ('<span class="imp-err" title="' + reason + '">no data</span>');
+    return null;
+  }
+
+  async function readAll() {
+    const btn = $('#imp-read');
+    const rows = rowsToRead();
+    if (!rows.length) { $('#imp-progress').textContent = "No printers with an IP to read."; return; }
+    btn.disabled = true;   // guard only the Read button; the Save button stays usable
+    lastReadings = [];
+    readOk = {};
+    // Only reset the cells we're about to read; leave no-IP / stale rows as they are.
+    rows.forEach(function (tr) {
+      tr.querySelector('.imp-cell').innerHTML = '<span class="imp-pending">—</span>';
+    });
+    $('#imp-summary').textContent = "";
+
+    let total = 0, read = 0, failed = 0, done = 0;
+    const queue = rows.slice();
+
+    function refresh() {
+      $('#imp-progress').textContent = "Read " + done + " / " + rows.length + "…";
+      $('#imp-summary').textContent =
+        "· " + read + " printer" + (read === 1 ? "" : "s") + " read" +
+        (failed ? " · " + failed + " no data / unreachable" : "");
+      recomputeTotals();
+    }
+
+    async function worker() {
+      while (queue.length) {
+        const tr = queue.shift();
+        const v = await readOne(tr);
+        done += 1;
+        if (v === null) { failed += 1; }
+        else {
+          total += v; read += 1;
+          readOk[tr.dataset.pk] = v;
+          lastReadings.push({
+            asset_tag: tr.dataset.tag || "", serial_number: tr.dataset.serial || "",
+            service_id: tr.dataset.sid || "", area: tr.dataset.area || "",
+            manufacturer: tr.dataset.manufacturer || "", model: tr.dataset.model || "",
+            ip: tr.dataset.ip || "", impressions: v,
+          });
+        }
+        refresh();
+      }
+    }
+
+    refresh();
+    try {
+      const workers = [];
+      for (let i = 0; i < Math.min(CONCURRENCY, rows.length); i += 1) workers.push(worker());
+      await Promise.all(workers);
+      $('#imp-progress').textContent = "Done — read " + read + " / " + rows.length +
+        (failed ? " (" + failed + " no data / unreachable)" : "") + ".";
+    } finally {
+      btn.disabled = false;   // always re-enable the Read button, even on error
+      // Remember failures and keep the Save button available to the admin even when
+      // some printers were unreachable; flag it amber so it's clear there were errors.
+      readFailures = failed;
+      const s = $('#imp-snap');
+      if (s) {
+        s.disabled = LOCKED;
+        s.classList.toggle('has-errors', failed > 0);
+        s.title = failed > 0
+          ? failed + " printer(s) unreachable — you can still snapshot (a warning will confirm)"
+          : "Save the read + manually-entered readings";
+      }
+    }
+  }
+
+  const readBtn = $('#imp-read');
+  if (readBtn) readBtn.addEventListener('click', readAll);
+
+  // On load, paint totals from last-saved (stale) values (readOk empty → all in-use
+  // count as unreachable/last-saved). "Read all" replaces with live figures.
+  recomputeTotals();
+  (function () {
+    let n = 0;
+    inUseRows().forEach(function (tr) { if ((tr.dataset.last || "").trim() !== "") n += 1; });
+    const su = $('#imp-summary');
+    if (su && n) su.textContent = "· last saved (" + n + " printers) — not yet read live";
+  })();
+
+  // Manually-entered readings from the not-in-use table (rows with a number).
+  function offlineReadings() {
+    const out = [];
+    document.querySelectorAll('.off-row').forEach(function (tr) {
+      const inp = tr.querySelector('.off-imp');
+      if (!inp) return;
+      const raw = (inp.value || "").toString().replace(/[^0-9]/g, "");
+      if (raw === "") return;
+      out.push({
+        asset_tag: tr.dataset.tag || "", serial_number: tr.dataset.serial || "",
+        service_id: tr.dataset.sid || "", area: tr.dataset.area || "",
+        manufacturer: tr.dataset.manufacturer || "", model: tr.dataset.model || "",
+        ip: tr.dataset.ip || "", impressions: parseInt(raw, 10),
+      });
+    });
+    return out;
+  }
+  function updateOfflineSubtotal() {
+    const rs = offlineReadings();
+    const sum = rs.reduce(function (a, r) { return a + r.impressions; }, 0);
+    const st = $('#off-subtotal'); if (st) st.textContent = rs.length ? fmt(sum) : "—";
+    const su = $('#off-summary'); if (su) su.textContent = rs.length ? ("· " + rs.length + " entered") : "";
+    const si = $('#off-summary-inline'); if (si) si.textContent = rs.length ? fmt(sum) : "—";
+    recomputeTotals();
+  }
+  document.querySelectorAll('.off-imp').forEach(function (inp) {
+    inp.addEventListener('input', updateOfflineSubtotal);
+  });
+  updateOfflineSubtotal();
+
+  // Click handler: if the last read had unreachable printers, confirm via a
+  // warning modal before saving; otherwise save straight away.
+  // Everything that goes into a snapshot: live reads + last-saved for unreachable
+  // in-use printers + manually-entered not-in-use values.
+  function combinedReadings() {
+    return lastReadings.concat(inUseUnreachableReadings()).concat(offlineReadings());
+  }
+  function saveSnapshot() {
+    if (LOCKED) return;
+    if (!combinedReadings().length) {
+      $('#imp-snap-msg').innerHTML =
+        "<span style='color:#991b1b'>Nothing to save — read impressions or enter a not-in-use value first.</span>";
+      return;
+    }
+    if (readFailures > 0) { showWarnModal(readFailures); return; }
+    doSaveSnapshot();
+  }
+
+  // Actually POST the snapshot (live reads + unreachable last-saved + not-in-use
+  // manual values — all count toward the saved total).
+  async function doSaveSnapshot() {
+    if (LOCKED) return;
+    const combined = combinedReadings();
+    if (!combined.length) return;
+    const snap = $('#imp-snap');
+    snap.disabled = true;
+    $('#imp-snap-msg').textContent = "Saving snapshot…";
+    try {
+      const r = await fetch(SNAP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+        body: JSON.stringify({ readings: combined }),
+      });
+      if (r.status === 403) {
+        // Blocked by the write gate (or CSRF). Guide the user to unlock.
+        $('#imp-snap-msg').innerHTML =
+          "<span style='color:#991b1b'>Locked (403) — enter the access code in the top bar to unlock, then Save again. If you're already unlocked, reload the page and retry.</span>";
+        snap.disabled = false;
+        return;
+      }
+      const data = await r.json();
+      if (data.ok) {
+        $('#imp-snap-msg').innerHTML =
+          "<span style='color:var(--green)'>Snapshot saved. Reloading…</span>";
+        window.location.reload();   // refresh the Saved-snapshots list
+      } else {
+        $('#imp-snap-msg').innerHTML =
+          "<span style='color:#991b1b'>" + (data.error || "Save failed") + "</span>";
+        snap.disabled = false;
+      }
+    } catch (e) {
+      $('#imp-snap-msg').innerHTML = "<span style='color:#991b1b'>Save failed (" + e + ")</span>";
+      snap.disabled = false;
+    }
+  }
+  const snapBtn = $('#imp-snap');
+  if (snapBtn) {
+    snapBtn.addEventListener('click', saveSnapshot);
+    snapBtn.disabled = LOCKED;   // ready immediately when unlocked (for offline-only saves)
+  }
+
+  // Warning modal shown when saving after a read that had unreachable printers.
+  function showWarnModal(n) {
+    const total = combinedReadings().length;
+    $('#imp-warn-text').innerHTML =
+      "<strong>" + n + "</strong> printer(s) were unreachable — their <strong>last saved value</strong> " +
+      "will be included in this snapshot. Save all <strong>" + total + "</strong> reading(s)?";
+    $('#imp-warn-overlay').hidden = false;
+  }
+  function hideWarnModal() { $('#imp-warn-overlay').hidden = true; }
+  const warnCancel = $('#imp-warn-cancel'), warnGo = $('#imp-warn-go');
+  if (warnCancel) warnCancel.addEventListener('click', hideWarnModal);
+  if (warnGo) warnGo.addEventListener('click', function () { hideWarnModal(); doSaveSnapshot(); });
+  const warnOverlay = $('#imp-warn-overlay');
+  if (warnOverlay) warnOverlay.addEventListener('click', function (e) {
+    if (e.target === warnOverlay) hideWarnModal();   // click backdrop to dismiss
+  });
+
+  // ✉ Email a saved snapshot. mailto: bodies are plain-text only (no HTML), so to
+  // get a Bootstrap-styled email we copy a rich-HTML report to the clipboard and
+  // open the mail app (month in the subject); the user pastes (Ctrl+V) into the body.
+  (function () {
+    const el = document.getElementById('impSnapData');
+    if (!el) return;
+    let snaps = [];
+    try { snaps = JSON.parse(el.textContent || "[]"); } catch (e) {}
+    const byPk = {};
+    snaps.forEach(function (s) { byPk[String(s.pk)] = s; });
+
+    function esc(v) {
+      return String(v == null ? "" : v)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    // Bootstrap-flavoured HTML report with INLINE styles (email clients strip
+    // <style> blocks and don't have Bootstrap, so every rule must be inline).
+    function buildHtml(s) {
+      const cellCss = "padding:7px 10px;border:1px solid #dee2e6;";
+      const th = function (t, num) {
+        return '<th style="' + cellCss + 'text-align:' + (num ? 'right' : 'left') +
+               ';background:#212529;color:#fff;font-weight:600;">' + esc(t) + '</th>';
+      };
+      const td = function (t, num) {
+        return '<td style="' + cellCss + 'text-align:' + (num ? 'right' : 'left') +
+               (num ? 'font-variant-numeric:tabular-nums;' : '') + '">' + esc(t) + '</td>';
+      };
+      const body = s.readings.map(function (r, i) {
+        return '<tr style="background:' + (i % 2 ? '#f8f9fa' : '#ffffff') + ';">' +
+          td(r.asset_tag) + td(r.serial_number) + td(r.service_id) +
+          td(r.make_model || ((r.manufacturer || "") + " " + (r.model || "")).trim()) + td(r.ip) +
+          td(Number(r.impressions).toLocaleString(), true) + '</tr>';
+      }).join("");
+      return '' +
+        '<div style="font-family:Helvetica,Arial,sans-serif;color:#212529;max-width:820px;">' +
+          '<h2 style="margin:0 0 6px;font-size:20px;">Printer impressions — ' + esc(s.site_label) + '</h2>' +
+          '<p style="margin:0 0 12px;font-size:13px;color:#6c757d;">' +
+            '<span style="display:inline-block;background:#0d6efd;color:#fff;border-radius:12px;' +
+            'padding:2px 10px;font-size:12px;font-weight:600;">' + esc(s.month_label) + '</span>' +
+            '&nbsp;&nbsp;Taken ' + esc(s.taken_at) + '</p>' +
+          '<table style="border-collapse:collapse;width:100%;font-size:13px;border:1px solid #dee2e6;">' +
+            '<thead><tr>' + th("Asset tag") + th("Serial") + th("Service ID") + th("Make / Model") +
+              th("IP") + th("Impressions", true) + '</tr></thead>' +
+            '<tbody>' + body + '</tbody>' +
+            '<tfoot><tr style="font-weight:700;background:#e9ecef;">' +
+              '<td colspan="5" style="' + cellCss + 'border-top:2px solid #adb5bd;">Grand total · ' +
+                s.count + ' printer(s)</td>' +
+              '<td style="' + cellCss + 'border-top:2px solid #adb5bd;text-align:right;">' +
+                Number(s.total).toLocaleString() + '</td>' +
+            '</tr></tfoot>' +
+          '</table>' +
+        '</div>';
+    }
+
+    // Copy rich HTML to the clipboard. Prefer the async Clipboard API (secure
+    // contexts); fall back to selecting a live node + execCommand (works on the
+    // http LAN origin). Returns a Promise<bool>.
+    function execCopyHtml(html) {
+      const holder = document.createElement("div");
+      holder.setAttribute("contenteditable", "true");
+      holder.style.position = "fixed"; holder.style.left = "-9999px"; holder.style.top = "0";
+      holder.innerHTML = html;
+      document.body.appendChild(holder);
+      const range = document.createRange(); range.selectNodeContents(holder);
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) {}
+      sel.removeAllRanges(); document.body.removeChild(holder);
+      return ok;
+    }
+    function copyRich(html, plain) {
+      if (navigator.clipboard && window.ClipboardItem && window.isSecureContext) {
+        try {
+          const item = new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([plain], { type: "text/plain" }),
+          });
+          return navigator.clipboard.write([item]).then(function () { return true; })
+            .catch(function () { return execCopyHtml(html); });
+        } catch (e) { return Promise.resolve(execCopyHtml(html)); }
+      }
+      return Promise.resolve(execCopyHtml(html));
+    }
+
+    // Column-aligned plain-text report — used as the clipboard text/plain fallback.
+    function buildBody(s) {
+      const cols = [
+        { key: "asset_tag", head: "Asset tag" },
+        { key: "serial_number", head: "Serial" },
+        { key: "service_id", head: "Service ID" },
+        { key: "make_model", head: "Make / Model" },
+        { key: "ip", head: "IP" },
+        { key: "impressions", head: "Impressions", num: true },
+      ];
+      const cell = function (r, c) {
+        if (c.key === "make_model") {
+          return String(r.make_model || ((r.manufacturer || "") + " " + (r.model || "")).trim());
+        }
+        const v = r[c.key];
+        return c.num ? Number(v || 0).toLocaleString() : String(v == null ? "" : v);
+      };
+      const w = cols.map(function (c) {
+        return Math.max(c.head.length, ...s.readings.map(function (r) { return cell(r, c).length; }), 3);
+      });
+      const GAP = "     ";  // 5 spaces between columns so they don't run together
+      const fmtRow = function (vals) {
+        return vals.map(function (v, i) {
+          return cols[i].num ? String(v).padStart(w[i]) : String(v).padEnd(w[i]);
+        }).join(GAP);
+      };
+      const rule = w.map(function (n) { return "-".repeat(n); }).join(GAP);
+      const lines = [
+        "PRINTER IMPRESSIONS — " + s.site_label + " — " + s.month_label,
+        "Taken: " + s.taken_at,
+        "=".repeat(rule.length),
+        "",
+        fmtRow(cols.map(function (c) { return c.head; })),
+        rule,
+      ];
+      s.readings.forEach(function (r) {
+        lines.push(fmtRow(cols.map(function (c) { return cell(r, c); })));
+      });
+      lines.push(rule);
+      lines.push(fmtRow(["TOTAL", "", "", "", "", Number(s.total).toLocaleString()]));
+      lines.push("across " + s.count + " printer(s)");
+      return lines.join("\n");
+    }
+    // Download a styled .eml the mail app opens as a ready-to-send draft with the
+    // HTML report already in the body. "X-Unsent: 1" makes Outlook open it in
+    // compose mode. Plain ASCII hyphen in the Subject header avoids MIME encoding.
+    function downloadEml(s, subject) {
+      const html = "<html><head><meta charset=\"utf-8\"></head><body>" + buildHtml(s) + "</body></html>";
+      const eml = [
+        "To: ",
+        "Subject: " + subject,
+        "X-Unsent: 1",
+        "MIME-Version: 1.0",
+        "Content-Type: text/html; charset=UTF-8",
+        "",
+        html,
+      ].join("\r\n");
+      const url = URL.createObjectURL(new Blob([eml], { type: "message/rfc822" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = "impressions-" + (s.period || "report") + ".eml";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+    }
+
+    document.querySelectorAll('[data-email-pk]').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        const s = byPk[this.dataset.emailPk];
+        if (!s) return;
+        const mode = this.dataset.mode;
+        // Hyphens, not em dashes: safe in mail headers. Site code included so two
+        // sites' monthly reports don't arrive with identical subjects.
+        const subject = "Printer impressions - " + s.site_label + " - " + s.month_label;
+        if (mode === "eml") {
+          downloadEml(s, subject);
+          return;
+        }
+        if (mode === "text") {
+          // Open the mail app with the readable plain-text report IN the body.
+          window.location.href = "mailto:?subject=" + encodeURIComponent(subject) +
+                                 "&body=" + encodeURIComponent(buildBody(s));
+          return;
+        }
+        // "styled": copy rich HTML, then open the mail app (subject only) to paste into.
+        const orig = this.textContent, self = this;
+        const ok = await copyRich(buildHtml(s), buildBody(s));
+        self.textContent = ok ? "✓ Copied — paste (Ctrl+V)" : "⚠ Copy failed";
+        setTimeout(function () { self.textContent = orig; }, 3000);
+        window.location.href = "mailto:?subject=" + encodeURIComponent(subject);
+      });
+    });
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "inventory/base.html" %}
+{% block content %}
+<div class="card" style="max-width:480px;">
+  <h1>Delete session?</h1>
+  <p>This will permanently delete <strong>{{ session.name }}</strong>, its imported
+     items and all scans.</p>
+  <form method="post">
+    {% csrf_token %}
+    <button class="btn danger" type="submit">Yes, delete</button>
+    <a class="btn secondary" href="{% url 'session_detail' session.pk %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Inventory Corrections Importer",
+  "version": "0.9.7",
+  "version_name": "0.9.7 · empty expected value now clears the field",
+  "description": "Import the corrections CSV exported from the inventory system, view it, and apply the expected values onto the ServiceNow asset list.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Inventory Corrections"
+  },
+  "permissions": ["storage", "scripting", "activeTab"],
+  "host_permissions": ["https://your-instance.service-now.com/*"]
+}

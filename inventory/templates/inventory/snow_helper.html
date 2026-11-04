@@ -1,0 +1,124 @@
+{% extends "inventory/base.html" %}
+{% block title %}SNOW Helper{% endblock %}
+{% block content %}
+
+<style>
+  .sh-card { max-width: 820px; }
+  #sh-input { width: 100%; font-size: 16px; padding: 10px; font-family: monospace;
+              border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
+  .sh-mode { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; font-size: 13px; }
+  .sh-mode label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .sh-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  #sh-link-wrap { margin-top: 12px; font-size: 13px; word-break: break-all; }
+</style>
+
+<div class="card sh-card">
+  <h1 style="margin:0 0 6px;">SNOW Helper</h1>
+  <p class="muted" style="margin:0 0 12px;">
+    Scan or paste <strong>asset tags</strong> and/or <strong>serial numbers</strong> — one per line
+    (spaces, commas or semicolons also work). Submit opens a single ServiceNow
+    <code>alm_asset</code> list of <em>all</em> of them in a new tab (every value is OR-ed).
+  </p>
+
+  <textarea id="sh-input" rows="12" autofocus
+            placeholder="000057592&#10;000057588&#10;G22C72688&#10;G22C72667"></textarea>
+
+  <div class="sh-mode">
+    <label><input type="radio" name="sh-mode" value="auto" checked>
+      Auto-detect <span class="muted">(all-digits → asset tag, otherwise serial)</span></label>
+    <label><input type="radio" name="sh-mode" value="asset_tag"> All asset tags</label>
+    <label><input type="radio" name="sh-mode" value="serial_number"> All serial numbers</label>
+  </div>
+
+  <div class="sh-actions">
+    <button class="btn" id="sh-open" type="button">Open in ServiceNow ↗</button>
+    <span class="muted" id="sh-count"></span>
+  </div>
+
+  <div id="sh-link-wrap" hidden>
+    Pop-up blocked? <a id="sh-link" href="#" target="_blank" rel="noopener">Open the list ↗</a>
+  </div>
+</div>
+
+<div class="card sh-card">
+  <h2 style="margin:0 0 6px;">Find a person's assets</h2>
+  <p class="muted" style="margin:0 0 12px;">
+    Assets <strong>Assigned to</strong> or <strong>Managed by</strong> someone — start typing a name
+    (autocompletes from those fields); picking a suggestion opens the ServiceNow list in a new tab.
+  </p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <input id="sh-person" list="sh-people" autocomplete="off" placeholder="Type a name…"
+           style="flex:1; min-width:240px; padding:8px 10px; font-size:16px;
+                  border:1px solid var(--line); border-radius:8px;">
+    <datalist id="sh-people">
+      {% for n in people %}<option value="{{ n }}"></option>{% endfor %}
+    </datalist>
+    <button class="btn" id="sh-person-open" type="button">Open in ServiceNow ↗</button>
+  </div>
+  <div id="sh-person-linkwrap" hidden style="margin-top:8px; font-size:13px; word-break:break-all;">
+    Pop-up blocked? <a id="sh-person-link" href="#" target="_blank" rel="noopener">Open the list ↗</a>
+  </div>
+</div>
+
+<script>
+  const SNOW_BASE = "https://your-instance.service-now.com/now/nav/ui/classic/params/target/";
+  const $ = function (s) { return document.querySelector(s); };
+
+  function tokens() {
+    return ($("#sh-input").value || "").split(/[\s,;]+/).map(function (t) { return t.trim(); }).filter(Boolean);
+  }
+  function fieldFor(tok, mode) {
+    if (mode === "asset_tag" || mode === "serial_number") return mode;
+    return /^[0-9]+$/.test(tok) ? "asset_tag" : "serial_number";   // auto
+  }
+  // Double-encoded like the app's other SNOW links. Each value is its own ^NQ
+  // ("new query") block rather than one big ^OR, so ServiceNow lists the
+  // results in the order they were typed instead of its own default sort.
+  function buildUrl() {
+    const mode = document.querySelector('input[name="sh-mode"]:checked').value;
+    const toks = Array.from(new Set(tokens()));      // de-dupe, keep order
+    if (!toks.length) return { url: "", n: 0 };
+    const conds = toks.map(function (t) { return fieldFor(t, mode) + "=" + t; });
+    const inner = encodeURIComponent(conds.join("^NQ"));
+    const target = encodeURIComponent(
+      "alm_asset_list.do?sysparm_query=" + inner + "&sysparm_first_row=1&sysparm_view=");
+    return { url: SNOW_BASE + target, n: toks.length };
+  }
+
+  $("#sh-open").addEventListener("click", function () {
+    const r = buildUrl();
+    if (!r.url) { $("#sh-count").textContent = "Enter at least one tag or serial."; return; }
+    $("#sh-count").textContent = r.n + " device(s).";
+    $("#sh-link").href = r.url;
+    $("#sh-link-wrap").hidden = false;
+    window.open(r.url, "_blank", "noopener");
+  });
+
+  // Person lookup: open the SNOW list for assets Assigned to OR Managed by a name.
+  // Query = GOTOassigned_to.nameLIKE<name>^NQmanaged_byLIKE<name> (double-encoded).
+  function personUrl(name) {
+    const q = "GOTOassigned_to.nameLIKE" + name + "^NQmanaged_byLIKE" + name;
+    const inner = encodeURIComponent(q);
+    const target = encodeURIComponent(
+      "alm_asset_list.do?sysparm_query=" + inner + "&sysparm_first_row=1&sysparm_view=");
+    return SNOW_BASE + target;
+  }
+  function openPerson() {
+    const name = ($("#sh-person").value || "").trim();
+    if (!name) return;
+    const url = personUrl(name);
+    $("#sh-person-link").href = url;
+    $("#sh-person-linkwrap").hidden = false;
+    window.open(url, "_blank", "noopener");
+  }
+  $("#sh-person-open").addEventListener("click", openPerson);
+  $("#sh-person").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); openPerson(); }
+  });
+  // Picking an autocomplete suggestion fires an "input" with no/insertReplacementText
+  // inputType — open straight away in that case.
+  $("#sh-person").addEventListener("input", function (e) {
+    if (!e.inputType || e.inputType === "insertReplacementText") openPerson();
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "inventory/base.html" %}
+{% block title %}{{ asset.asset_tag|default:asset.pk }} — Asset{% endblock %}
+{% block content %}
+
+<div class="card">
+  <a href="{% url 'asset_list' %}">← Back to assets</a>
+  <h1 style="margin:10px 0 0;">{{ asset.asset_tag|default:"(no asset tag)" }}</h1>
+  <p class="muted" style="margin:4px 0 0;">
+    {{ asset.model_category|default:"" }} · {{ asset.display_name|default:"" }}
+    · from {{ asset.source_tab }}
+  </p>
+</div>
+
+<div class="card">
+  <h2>All imported fields</h2>
+  <table>
+    <tbody>
+      {% for label, value in fields %}
+      <tr>
+        <th style="width:38%;">{{ label }}</th>
+        <td>{{ value|default:"—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

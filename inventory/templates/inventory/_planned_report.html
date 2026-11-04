@@ -1,0 +1,45 @@
+{% load static %}
+<div class="pa-states">
+{% for g in planned_groups %}
+<details class="pa-grp">
+  <summary><strong>{{ g.state }}</strong> — {{ g.rows|length }} asset{{ g.rows|length|pluralize }}
+    · <span class="pa-g-pass">{{ g.passed }}</span> pass · <span class="pa-g-fail">{{ g.failed }}</span> fail</summary>
+  <div style="overflow-x:auto;">
+  <table class="scan-tbl pa-tbl">
+    <colgroup><col style="width:16%"><col style="width:14%"><col style="width:14%"><col style="width:14%">
+      <col style="width:14%"><col style="width:14%"><col style="width:14%"></colgroup>
+    <thead><tr><th>Asset tag / Serial / Category / Display name</th><th>Name</th><th>Station ID</th><th>GL account</th>
+      <th>Location</th><th>Assigned to</th><th class="pa-res">Result</th></tr></thead>
+    <tbody>
+      {% for it in g.rows %}
+      <tr>
+        <td>{% if it.asset_tag %}{{ it.asset_tag }}{% if it.snow_url %}<a href="{{ it.snow_url }}" target="_blank"
+            rel="noopener" title="Open in ServiceNow"><img class="lnk-ico" src="{% static 'inventory/snow.jpg' %}"
+            alt="SNOW"></a>{% endif %}{% else %}—{% endif %}
+            <div class="pa-serial">{{ it.serial_number|default:"—" }}</div>
+            <div class="pa-serial">{{ it.model_category|default:"—" }}</div>
+            <div class="pa-serial">{{ it.display_name|default:"—" }}</div></td>
+        <td>{{ it.name|default:"—" }}</td>
+        <td>{{ it.station_id|default:"—" }}</td>
+        <td>{% if "202606" in it.gl_account %}<span class="inv-dot" title="Marked for inventory (GL account 202606)"></span>{% else %}<span class="inv-dot bad" title="Not marked (no 202606 in GL account)"></span>{% endif %} {{ it.gl_account|default:"—" }}</td>
+        <td>{{ it.location|default:"—" }}</td><td>{{ it.assigned_to|default:"—" }}</td>
+        <td class="pa-res">
+          <label><input type="radio" class="pa-radio" name="pa{{ it.pk }}" value="pass"
+            data-url="{% url 'planned_audit_result' it.pk %}" {% if it.result == "pass" %}checked{% endif %}
+            {% if not can_write %}disabled{% endif %}> Pass</label>
+          <label style="margin-left:8px;"><input type="radio" class="pa-radio" name="pa{{ it.pk }}" value="fail"
+            data-url="{% url 'planned_audit_result' it.pk %}" {% if it.result == "fail" %}checked{% endif %}
+            {% if not can_write %}disabled{% endif %}> Fail</label>
+          <button type="button" class="pa-plus{% if it.comment %} has{% endif %}"
+            data-url="{% url 'planned_audit_result' it.pk %}" data-comment="{{ it.comment }}"
+            data-tag="{{ it.asset_tag }}" title="{% if it.comment %}View / edit the failure comment{% else %}Add a comment for this failure{% endif %}"
+            {% if it.result != "fail" %}hidden{% endif %}>+</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</details>
+{% endfor %}
+</div>

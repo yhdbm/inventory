@@ -1,0 +1,58 @@
+{% extends "inventory/base.html" %}
+{% block title %}RF Snapshots{% endblock %}
+{% block content %}
+
+<style>
+  .snap-details { margin-top:10px; }
+  .snap-cols { display:flex; gap:24px; flex-wrap:wrap; }
+  .snap-cols > div { flex:1 1 240px; min-width:0; }
+  .snap-cols h4 { margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+  .snap-cols table { font-size:13px; }
+  details > summary { cursor:pointer; color:var(--accent); font-size:13px; }
+</style>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">RF Snapshots</h1>
+    <span class="muted">{{ snapshots|length }} recorded · <a href="{% url 'rf_mobiles_list' %}">← RF Mobiles</a></span>
+  </div>
+  <p class="muted">Monthly RF-mobile audit snapshots — checked vs. Missing at Audit, with the Station-ID / State split.</p>
+</div>
+
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <thead>
+      <tr><th>Taken</th><th>Month</th><th>Total</th><th>Checked</th><th>Missing</th><th>%</th><th>Breakdowns</th></tr>
+    </thead>
+    <tbody>
+      {% for s in snapshots %}
+      <tr>
+        <td>{{ s.taken_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ s.period }}</td>
+        <td>{{ s.total }}</td>
+        <td>{{ s.checked }}</td>
+        <td>{{ s.missing }}</td>
+        <td><strong>{{ s.checked_pct }}%</strong></td>
+        <td>
+          <details>
+            <summary>view</summary>
+            <div class="snap-details snap-cols">
+              <div>
+                <h4>By Station ID (checked)</h4>
+                <table>{% for r in s.stations %}<tr><td>{{ r.label }}</td><td class="muted">{{ r.count }}</td></tr>{% endfor %}</table>
+              </div>
+              <div>
+                <h4>By state (checked)</h4>
+                <table>{% for r in s.states %}<tr><td>{{ r.label }}</td><td class="muted">{{ r.count }}</td></tr>{% endfor %}</table>
+              </div>
+            </div>
+          </details>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="muted">No RF snapshots yet. Use “Save snapshot” on the RF Mobiles page.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

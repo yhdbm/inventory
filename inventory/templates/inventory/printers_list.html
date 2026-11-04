@@ -1,0 +1,909 @@
+{% extends "inventory/base.html" %}
+{% load static %}
+{% block title %}Printers{% endblock %}
+{% block content %}
+
+<style>
+  .rec-link { margin-left: 6px; text-decoration: none; font-size: 14px; cursor: pointer; }
+  .rec-link:hover { filter: brightness(1.1); }
+  .lnk-ico { width: 15px; height: 15px; vertical-align: middle; margin-left: 6px; }
+  .printers-table { font-size: 13px; }
+  .printers-table th { font-size: 11px; }
+  .printers-table td, .printers-table th { padding: 6px 8px; vertical-align: middle; }
+  /* Persistent (sticky) header inside the scrolling card. */
+  .printers-card { max-height: 76vh; overflow: auto; }
+  .printers-table thead th { position: sticky; top: 0; z-index: 3; background: #eef2f7;
+                             box-shadow: inset 0 -1px 0 var(--line); }
+  .grp > td { cursor: pointer; background: #fafbfc; font-weight: 700; font-size: 14px;
+              border-top: 2px solid #cbd5e1; }
+  .grp > td:hover { background: #eef2f7; }
+  .caret { display: inline-block; width: 14px; color: var(--muted); transition: transform .12s ease; }
+  .caret::before { content: "▶"; font-size: 10px; }
+  tr.grp.open > td > .caret { transform: rotate(90deg); }
+  .pf-cell { cursor: text; min-width: 84px; }
+  .pf-cell:hover { background: #f1f5f9; }
+  .pf-cell.dirty { background: #fef3c7; }
+  .pf-cell input { width: 100%; padding: 3px 6px; border: 1px solid var(--accent);
+                   border-radius: 5px; font-size: 13px; }
+  .pf-status { font-size: 11px; }
+  /* Copy-to-clipboard icon — centered on its own line below each value */
+  .pf-copy { border: 0; background: none; cursor: pointer; padding: 0;
+             display: block; width: fit-content; margin: 3px auto 0;
+             color: var(--muted); opacity: .5; line-height: 0; }
+  .pf-copy:hover { opacity: 1; color: var(--accent); }
+  .pf-copy.copied { opacity: 1; color: var(--green); }
+  .pf-copy svg { width: 14px; height: 14px; display: block; }
+  /* FMS / FMS 2 / DMS cells: the copy icon plus a troubleshooting wrench, side by side. */
+  .pf-icons { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 3px; }
+  .pf-icons .pf-copy { margin: 0; }
+  .pf-wrench { border: 0; background: none; cursor: pointer; padding: 0; display: block;
+               color: var(--muted); opacity: .5; line-height: 0; }
+  .pf-wrench:hover { opacity: 1; color: var(--accent); }
+  .pf-wrench svg { width: 14px; height: 14px; display: block; }
+  /* Queue troubleshooting modal (mirrors the IT-Toolkit /queues_troubleshoot page). */
+  .qt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .qt-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px; text-align: center; }
+  .qt-card img { width: 140px; height: 140px; background: #fff; border: 1px solid var(--line);
+                 border-radius: 8px; padding: 4px; }
+  .qt-card .q-cmd { text-align: left; margin-top: 8px; }
+  @media (max-width: 640px) { .qt-grid { grid-template-columns: 1fr; } }
+  .cmt-cell { max-width: 220px; }
+  /* Supply-level "+" trigger + results */
+  .lvl-cell { text-align: center; }
+  .lvl-btn { font-weight: 700; line-height: 1; padding: 2px 9px; }
+  .lvl-result { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lvl-chip { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px;
+              background: #eef2f7; border: 1px solid var(--line); white-space: nowrap; }
+  .lvl-chip.low { background: #fee2e2; border-color: #fca5a5; color: #991b1b; font-weight: 600; }
+  .lvl-err { color: #991b1b; font-size: 13px; }
+  .lvl-meta { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  /* Auto-probed supply status: inline low chips + row / header coloring */
+  .lvl-inline { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: center; }
+  .lvl-chip.lvl-mini { padding: 2px 7px; font-size: 11px; }
+  .lvl-ok { color: var(--green); font-weight: 600; font-size: 12px; }
+  .lvl-unknown { color: var(--muted); font-weight: 700; cursor: help; }
+  /* Row tint by supply status (left accent survives even when a group is collapsed). */
+  .grp-row.sup-low { background: #fef2f2; }
+  .grp-row.sup-low > td:first-child { box-shadow: inset 3px 0 0 #ef4444; }
+  .grp-row.sup-ok > td:first-child { box-shadow: inset 3px 0 0 var(--green); }
+  .grp-row.sup-unknown > td:first-child { box-shadow: inset 3px 0 0 #cbd5e1; }
+  /* Station header tint + "N low" badge when any printer under it is low. */
+  .grp.grp-low > td { background: #fef2f2; border-top-color: #fca5a5; }
+  .grp.grp-low > td:hover { background: #fee2e2; }
+  .grp-badge { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px;
+               font-size: 11px; font-weight: 600; background: #fee2e2; border: 1px solid #fca5a5;
+               color: #991b1b; }
+  #lvlProgress { margin-top: 6px; font-size: 12px; }
+  /* Hover popover on the queue columns (FMS / FMS 2 / DMS).
+     Positioned by JS in fixed coords so the scrolling card never clips it. */
+  .q-pop { position: fixed; z-index: 2500; background: var(--card); border: 1px solid var(--line);
+           border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,.18); padding: 8px 10px;
+           font-size: 12px; }
+  .q-pop .q-pop-key { color: var(--muted); display: block; margin-bottom: 6px; }
+  /* Queue modal (wider than the comments modal — it holds a form + commands + QR). */
+  .q-box { width: min(860px, 94vw); }
+  .q-grid { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; }
+  .q-ctx { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+  .q-ctx strong { color: var(--ink); }
+  .q-field { margin-bottom: 10px; }
+  .q-field label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
+                   letter-spacing: .02em; color: var(--muted); margin-bottom: 3px; }
+  .q-field input { width: 100%; padding: 5px 8px; border: 1px solid var(--line);
+                   border-radius: 6px; font-size: 13px; }
+  .q-field input:focus { outline: none; border-color: var(--accent); }
+  /* DNS name input with a fixed ".example.corp" suffix shown inline. */
+  .q-suffixed { display: flex; align-items: stretch; }
+  .q-suffixed input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .q-suffix { display: flex; align-items: center; padding: 0 8px; font-size: 12px;
+              color: var(--muted); background: #eef2f7; border: 1px solid var(--line);
+              border-left: 0; border-radius: 0 6px 6px 0; white-space: nowrap; }
+  .q-radio { display: inline-flex; align-items: center; gap: 5px; margin-right: 14px;
+             font-size: 13px; font-weight: 500; text-transform: none; letter-spacing: 0;
+             color: var(--ink); cursor: pointer; }
+  .q-auto { font-size: 11px; color: var(--muted); }
+  /* Step 0 block: link to the Internal DNS Record Request catalog item + the
+     values to enter there. */
+  .q-dnsreq { background: #f8fafc; border: 1px solid var(--line); border-radius: 10px;
+              padding: 10px 12px; margin-bottom: 14px; }
+  .q-dnslist { list-style: none; margin: 10px 0 0; padding: 0; display: grid;
+               grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 12px; }
+  .q-dnslist li { display: contents; }
+  .q-dnslist span { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .q-dnslist code { font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+                    color: var(--ink); word-break: break-all; }
+  .q-hint { display: block; margin-top: 3px; font-size: 11px; font-weight: 400;
+            text-transform: none; letter-spacing: 0; color: var(--muted); }
+  .q-hint code { background: #eef2f7; border-radius: 3px; padding: 0 3px; font-size: 11px; }
+  .q-cmd { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 10px 12px;
+           font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.5;
+           white-space: pre-wrap; word-break: break-all; margin: 0; max-height: 220px; overflow: auto; }
+  /* Click-to-copy command boxes. */
+  .q-copy { cursor: pointer; border: 1px solid transparent; position: relative; margin-bottom: 8px; }
+  .q-copy:hover { border-color: var(--accent); }
+  .q-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .q-copy.copied { border-color: var(--green); }
+  .q-copy.copied::after { content: "Copied"; position: absolute; top: 6px; right: 8px;
+                          background: var(--green); color: #fff; font-family: inherit;
+                          font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; }
+  .q-qr { text-align: center; }
+  .q-qr img { display: block; width: 190px; height: 190px; border: 1px solid var(--line);
+              border-radius: 8px; background: #fff; padding: 6px; }
+  .q-qr .muted { font-size: 11px; display: block; margin-top: 6px; }
+  .q-qr-err { width: 190px; font-size: 11px; color: #991b1b; }
+  .q-sec-label { font-size: 11px; font-weight: 600; text-transform: uppercase;
+                 letter-spacing: .02em; color: var(--muted); margin: 14px 0 5px; }
+  .q-todo { font-size: 11px; color: #b45309; background: #fffbeb; border: 1px solid #fcd34d;
+            border-radius: 6px; padding: 6px 8px; margin: 12px 0 0; }
+  /* Comments modal */
+  .cmt-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 2000;
+                 display: flex; align-items: center; justify-content: center; }
+  .cmt-box { background: var(--card); border-radius: 12px; padding: 18px; width: min(620px, 92vw);
+             box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+  .cmt-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .cmt-head button { background: none; border: 0; font-size: 18px; cursor: pointer; color: var(--muted); }
+  .cmt-text { background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+              padding: 12px; max-height: 50vh; overflow: auto; white-space: pre-wrap;
+              word-break: break-word; font-size: 13px; margin: 0 0 12px; }
+</style>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Printers — {{ warehouse.label|default:"all sites" }}</h1>
+    <span class="muted">{{ total }} printer(s) · {{ printer_groups|length }} station(s) · In use</span>
+  </div>
+  <p class="muted">
+    Grouped by Station ID (click to expand). The last columns are the structured
+    Comments fields — <strong>double-click</strong> a value to edit it, then
+    <strong>Save</strong> to record a pending Comments correction.
+  </p>
+  <div class="muted" id="lvlProgress"></div>
+</div>
+
+<div class="card printers-card">
+  <table class="printers-table">
+    <thead>
+      <tr>
+        <th>Asset Tag</th><th>Name</th><th>Manufacturer</th><th>Category</th><th>Model</th><th>Levels</th><th>Comments</th>
+        <th>IP</th><th>FMS</th><th>FMS 2</th><th>DMS</th><th>Service ID</th><th>FEDEX</th><th>UPS</th><th>Windows Queue</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in printer_groups %}
+        <tr class="grp" data-grp="{{ forloop.counter0 }}">
+          <td colspan="16">
+            <span class="caret"></span>
+            <strong>{{ g.station_id }}</strong>
+            <span class="muted" style="margin-left:8px; font-weight:400;">{{ g.count }} printer(s)</span>
+          </td>
+        </tr>
+        {% for p in g.printers %}
+        <tr class="grp-row" data-grp="{{ forloop.parentloop.counter0 }}" data-asset="{{ p.pk }}"
+            data-tag="{{ p.asset_tag }}" data-name="{{ p.name }}" data-ip="{{ p.ip }}"
+            data-model="{{ p.model }}" data-kind="{{ p.kind }}"
+            data-category="{{ p.model_category }}" hidden>
+          <td>{{ p.asset_tag|default:"—" }}{% if p.asset_tag %}{% if p.snow_url %}<a
+             href="{{ p.snow_url }}" target="_blank" rel="noopener" title="Open in ServiceNow"><img
+             class="lnk-ico" src="{% static 'inventory/snow.jpg' %}" alt="SNOW"></a>{% endif %}<a
+             href="{% url 'audit' %}?tag={{ p.asset_tag|urlencode }}&mirror=1"
+             class="rec-link" title="Open in Reconcile with all fields mirrored — tweak just what's wrong">🧩</a>{% endif %}</td>
+          <td>{{ p.name|default:"—" }}</td>
+          <td>{{ p.manufacturer|default:"—" }}</td>
+          <td>{{ p.model_category|default:"—" }}</td>
+          <td>{{ p.model|default:"—" }}</td>
+          <td class="lvl-cell">
+            {% if p.supports_levels %}
+              <button class="btn small lvl-btn" type="button" data-pk="{{ p.pk }}"
+                      data-name="{{ p.name }}" data-model="{{ p.model }}"
+                      title="Check supply levels">+</button>
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="cmt-cell">
+            {% if p.comments %}<a href="#" class="cmt-link" title="Open comments">{{ p.comments|truncatechars:40 }}</a>
+              <span class="cmt-full" hidden>{{ p.comments }}</span>{% else %}—{% endif %}
+          </td>
+          <td class="pf-cell pf-ip copyable" data-key="IP" data-val="{{ p.ip }}" data-orig="{{ p.ip }}">
+            {% if p.ip %}<a href="{{ p.ip_href }}" target="_blank" rel="noopener">{{ p.ip }}</a>{% else %}—{% endif %}
+          </td>
+          <td class="pf-cell copyable q-col" data-key="FMS" data-val="{{ p.fms }}" data-orig="{{ p.fms }}">{{ p.fms|default:"—" }}</td>
+          <td class="pf-cell copyable q-col" data-key="FMS 2" data-val="{{ p.fms2 }}" data-orig="{{ p.fms2 }}">{{ p.fms2|default:"—" }}</td>
+          <td class="pf-cell copyable q-col" data-key="DMS" data-val="{{ p.dms }}" data-orig="{{ p.dms }}">{{ p.dms|default:"—" }}</td>
+          <td class="pf-cell copyable" data-key="Service ID" data-val="{{ p.service_id }}" data-orig="{{ p.service_id }}">{{ p.service_id|default:"—" }}</td>
+          <td class="pf-cell copyable" data-key="FEDEX" data-val="{{ p.fedex }}" data-orig="{{ p.fedex }}">{{ p.fedex|default:"—" }}</td>
+          <td class="pf-cell copyable" data-key="UPS" data-val="{{ p.ups }}" data-orig="{{ p.ups }}">{{ p.ups|default:"—" }}</td>
+          <td class="pf-cell copyable" data-key="Windows Queue" data-val="{{ p.windows_queue }}" data-orig="{{ p.windows_queue }}">{{ p.windows_queue|default:"—" }}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn small pf-save" type="button" disabled
+                    {% if not can_write %}data-locked="1"{% endif %}>Save</button>
+            <span class="pf-status muted"></span>
+          </td>
+        </tr>
+        {% endfor %}
+      {% empty %}
+        <tr><td colspan="16" class="muted">No “In use” printers found for {{ warehouse.label|default:"this site" }}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div id="cmtModal" class="cmt-overlay" hidden>
+  <div class="cmt-box">
+    <div class="cmt-head"><strong>Comments</strong><button type="button" id="cmtClose" title="Close">✕</button></div>
+    <pre id="cmtText" class="cmt-text"></pre>
+    <button type="button" id="cmtCopy" class="btn small">📋 Copy</button>
+    <span id="cmtCopied" class="muted" style="margin-left:8px; font-size:12px;"></span>
+  </div>
+</div>
+
+<!-- Hover popover for the FMS / FMS 2 / DMS cells. Single reusable node, moved
+     and re-labelled as the pointer enters each queue cell. -->
+<div id="qPop" class="q-pop" hidden>
+  <span class="q-pop-key"></span>
+  <button type="button" class="btn small" id="qPopBtn">Add new queue?</button>
+</div>
+
+<div id="qModal" class="cmt-overlay" hidden>
+  <div class="cmt-box q-box">
+    <div class="cmt-head">
+      <strong id="qTitle">Add new queue</strong>
+      <button type="button" id="qClose" title="Close">✕</button>
+    </div>
+    <p class="q-ctx" id="qCtx"></p>
+
+    <!-- Step 0: the DNS record has to exist before the queue is created. Raw "&"
+         in the catalog URL must be written &amp; here (same as base.html's
+         "Create Incident" link). -->
+    <div class="q-dnsreq">
+      <a class="btn small" target="_blank" rel="noopener"
+         href="https://your-instance.service-now.com/acme?id=sc_cat_item&amp;sys_id=00000000000000000000000000000005&amp;table=sc_cat_item&amp;searchTerm=Internal%20DNS%20Record%20Request">Service
+        Portal Internal DNS Record Request page</a>
+      <ul class="q-dnslist">
+        <li><span>Domain</span><code>example.corp</code></li>
+        <li><span>Change type</span><code>Add</code></li>
+        <li><span>DNS Name</span><code id="qReqName">—</code></li>
+        <li><span>Record Type</span><code>(A) Host and IP Address (A-Records)</code></li>
+        <li><span>IP Address</span><code id="qReqIp">—</code></li>
+      </ul>
+    </div>
+
+    <div class="q-grid">
+      <div>
+        <div class="q-field">
+          <label for="qQueue">Queue name</label>
+          <input type="text" id="qQueue" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="q-field">
+          <label for="qDns">DNS name</label>
+          <input type="text" id="qDns" autocomplete="off" spellcheck="false">
+          <!-- Two different suffixes are derived from this one short host name, so
+               don't pin either of them to the input as an addon. -->
+          <span class="q-hint">short host — <code>.example.corp</code> in commands,
+            <code>@example.corp</code> in the ticket</span>
+        </div>
+        <div class="q-field">
+          <label>Printer type</label>
+          <label class="q-radio"><input type="radio" name="qKind" value="laser"> Laser</label>
+          <label class="q-radio"><input type="radio" name="qKind" value="label"> Label</label>
+          <span class="q-auto" id="qAuto"></span>
+        </div>
+      </div>
+      <div class="q-qr">
+        <div class="q-sec-label" style="margin-top:0;">Scan</div>
+        <img id="qQr" alt="QR code of the commands">
+        <div class="q-qr-err" id="qQrErr" hidden></div>
+        <span class="muted">Mirrors the commands</span>
+      </div>
+    </div>
+
+    <div id="qLaser">
+      <div class="q-sec-label">Commands — click a box to copy it</div>
+      <div class="q-cmd q-copy" id="qCmd1" role="button" tabindex="0" title="Click to copy"></div>
+      <div class="q-cmd q-copy" id="qCmd2" role="button" tabindex="0" title="Click to copy"></div>
+      <div class="q-sec-label">Ticket to PRINT-OPS</div>
+      <div class="q-cmd q-copy" id="qTicket" role="button" tabindex="0" title="Click to copy"></div>
+    </div>
+    <div id="qLabel" hidden>
+      <p class="q-todo">Label-printer commands haven't been specified yet — only the laser ones are defined.</p>
+    </div>
+  </div>
+</div>
+
+<div id="qtModal" class="cmt-overlay" hidden>
+  <div class="cmt-box q-box" style="width:min(680px,94vw); max-height:92vh; overflow:auto;">
+    <div class="cmt-head">
+      <strong id="qtTitle">Queue troubleshooting</strong>
+      <button type="button" id="qtClose" title="Close">✕</button>
+    </div>
+    <div class="q-field">
+      <label for="qtQueue">Queue or job number</label>
+      <input type="text" id="qtQueue" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="q-sec-label">Scan the QR or click a box to copy the command</div>
+    <div class="qt-grid" id="qtGrid"></div>
+  </div>
+</div>
+
+<div id="lvlModal" class="cmt-overlay" hidden>
+  <div class="cmt-box">
+    <div class="cmt-head"><strong id="lvlTitle">Supply levels</strong><button type="button" id="lvlClose" title="Close">✕</button></div>
+    <div id="lvlBody"></div>
+  </div>
+</div>
+
+<script>
+  const CSRF = "{{ csrf_token }}";
+  const SAVE_URL = "{% url 'printer_comments_save' %}";
+  const SUP_BASE = SAVE_URL.replace(/save\/$/, '');  // ".../printers/" + pk + "/supplies/"
+  const LOCKED = {{ can_write|yesno:"false,true" }};
+
+  // Clipboard icon (uses currentColor so it can flash green on success).
+  const COPY_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  const WRENCH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+  function addCopyBtn(td) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'pf-copy'; b.title = 'Copy value';
+    b.innerHTML = COPY_SVG;
+    if (td.classList.contains('q-col')) {
+      // Queue cells also get a wrench that opens the queue-troubleshooting modal.
+      const w = document.createElement('button');
+      w.type = 'button'; w.className = 'pf-wrench'; w.title = 'Troubleshoot this queue';
+      w.innerHTML = WRENCH_SVG;
+      const box = document.createElement('span');
+      box.className = 'pf-icons';
+      box.appendChild(b); box.appendChild(w);
+      td.appendChild(box);
+    } else {
+      td.appendChild(b);
+    }
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(function () { fallbackCopy(text); });
+    } else { fallbackCopy(text); }
+  }
+
+  function ipHref(v) { return /^https?:\/\//i.test(v) ? v : 'http://' + v; }
+
+  function renderCell(td) {
+    const v = td.dataset.val || '';
+    if (td.classList.contains('pf-ip')) {
+      td.innerHTML = v ? '<a href="' + ipHref(v) + '" target="_blank" rel="noopener">' +
+        v.replace(/</g, '&lt;') + '</a>' : '—';
+    } else { td.textContent = v || '—'; }
+    if (td.classList.contains('copyable') && v) addCopyBtn(td);
+  }
+  function rowDirty(tr) {
+    return Array.prototype.some.call(tr.querySelectorAll('.pf-cell'), function (td) {
+      return (td.dataset.val || '') !== (td.dataset.orig || '');
+    });
+  }
+  function refreshSave(tr) {
+    const btn = tr.querySelector('.pf-save');
+    btn.disabled = btn.dataset.locked === '1' || !rowDirty(tr);
+  }
+  function startEdit(td) {
+    if (td.querySelector('input')) return;
+    const v = td.dataset.val || '';
+    td.innerHTML = '';
+    const inp = document.createElement('input');
+    inp.value = v; td.appendChild(inp); inp.focus(); inp.select();
+    function commit() {
+      td.dataset.val = inp.value.trim();
+      renderCell(td);
+      td.classList.toggle('dirty', td.dataset.val !== (td.dataset.orig || ''));
+      refreshSave(td.closest('tr'));
+    }
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+      else if (e.key === 'Escape') { renderCell(td); }
+    });
+  }
+  document.querySelectorAll('.pf-cell').forEach(function (td) {
+    td.addEventListener('dblclick', function (e) {
+      if (e.target.closest('.pf-copy, .pf-wrench')) return;  // don't edit when using the icons
+      startEdit(td);
+    });
+  });
+
+  // Render the copy icon on each copyable cell, and copy its value on click.
+  document.querySelectorAll('.pf-cell.copyable').forEach(renderCell);
+  document.querySelector('.printers-table').addEventListener('click', function (e) {
+    const wr = e.target.closest('.pf-wrench');
+    if (wr) {
+      e.stopPropagation();
+      const cell = wr.closest('.pf-cell');
+      openQueueTroubleshoot(cell.dataset.val || '', cell.dataset.key || '');
+      return;
+    }
+    const btn = e.target.closest('.pf-copy');
+    if (!btn) return;
+    e.stopPropagation();
+    copyText(btn.closest('.pf-cell').dataset.val || '');
+    btn.classList.add('copied');
+    setTimeout(function () { btn.classList.remove('copied'); }, 900);
+  });
+
+  // --- Queue troubleshooting modal: same four actions as the IT-Toolkit
+  // /queues_troubleshoot page (list jobs / shut down / restart / cancel), each as a
+  // QR plus a click-to-copy command. The command strings match that page's QR values.
+  const QT_ACTIONS = [
+    { label: 'List jobs', cmd: function (q) { return 'lpstat -W -a' + q; } },
+    { label: 'Shutdown',  cmd: function (q) { return 'sudo enq -P' + q + ' -D'; } },
+    { label: 'Restart',   cmd: function (q) { return 'sudo enq -P' + q + ' -U'; } },
+    { label: 'Cancel',    cmd: function (q) { return 'sudo cancel ' + q; } },
+  ];
+  const qtModal = document.getElementById('qtModal');
+  const qtQueue = document.getElementById('qtQueue');
+  const qtGrid = document.getElementById('qtGrid');
+  const QT_QR_URL = "{% url 'qr_svg' %}";
+  function renderQueueTroubleshoot() {
+    const q = qtQueue.value.trim();
+    qtGrid.innerHTML = '';
+    if (!q) { qtGrid.innerHTML = '<div class="muted">Enter a queue or job number.</div>'; return; }
+    QT_ACTIONS.forEach(function (a) {
+      const cmd = a.cmd(q);
+      const card = document.createElement('div');
+      card.className = 'qt-card';
+      const h = document.createElement('div');
+      h.className = 'q-sec-label'; h.style.marginTop = '0'; h.textContent = a.label;
+      const img = document.createElement('img');
+      img.alt = 'QR code: ' + cmd; img.src = QT_QR_URL + '?text=' + encodeURIComponent(cmd);
+      img.addEventListener('error', function () {
+        const msg = document.createElement('div');
+        msg.className = 'q-qr-err'; msg.style.margin = '0 auto';
+        msg.textContent = "QR couldn't be generated (the server's QR support may be missing).";
+        img.replaceWith(msg);
+      });
+      const box = document.createElement('div');
+      box.className = 'q-cmd q-copy'; box.tabIndex = 0; box.setAttribute('role', 'button');
+      box.title = 'Click to copy'; box.textContent = cmd;
+      function copyBox() {
+        copyText(cmd);
+        box.classList.add('copied');
+        setTimeout(function () { box.classList.remove('copied'); }, 900);
+      }
+      box.addEventListener('click', copyBox);
+      box.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); copyBox(); }
+      });
+      card.appendChild(h); card.appendChild(img); card.appendChild(box);
+      qtGrid.appendChild(card);
+    });
+  }
+  function openQueueTroubleshoot(queue, key) {
+    document.getElementById('qtTitle').textContent = 'Queue troubleshooting' + (key ? ' — ' + key : '');
+    qtQueue.value = queue;
+    renderQueueTroubleshoot();
+    qtModal.hidden = false;
+  }
+  function closeQueueTroubleshoot() { qtModal.hidden = true; }
+  qtQueue.addEventListener('input', renderQueueTroubleshoot);
+  document.getElementById('qtClose').addEventListener('click', closeQueueTroubleshoot);
+  qtModal.addEventListener('click', function (e) { if (e.target === qtModal) closeQueueTroubleshoot(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeQueueTroubleshoot(); });
+
+  // Group expand / collapse (collapsed by default).
+  document.querySelectorAll('.grp').forEach(function (g) {
+    g.addEventListener('click', function () {
+      const i = g.dataset.grp;
+      const open = g.classList.toggle('open');
+      document.querySelectorAll('.grp-row[data-grp="' + i + '"]').forEach(function (r) { r.hidden = !open; });
+    });
+  });
+
+  document.querySelectorAll('.pf-save').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (LOCKED) return;
+      const tr = btn.closest('tr');
+      const fields = {};
+      tr.querySelectorAll('.pf-cell').forEach(function (td) { fields[td.dataset.key] = td.dataset.val || ''; });
+      const status = tr.querySelector('.pf-status');
+      status.textContent = 'Saving…';
+      fetch(SAVE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify({ asset_id: tr.dataset.asset, fields: fields }),
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data.ok) {
+          tr.querySelectorAll('.pf-cell').forEach(function (td) {
+            td.dataset.orig = td.dataset.val || ''; td.classList.remove('dirty');
+          });
+          refreshSave(tr);
+          status.innerHTML = "<span style='color:var(--green)'>Saved to corrections.</span>";
+        } else {
+          status.innerHTML = "<span style='color:#991b1b'>" + (data.error || 'Save failed') + "</span>";
+        }
+      }).catch(function () { status.innerHTML = "<span style='color:#991b1b'>Save failed</span>"; });
+    });
+  });
+
+  // --- On-demand supply-level check (modal) ---
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  const lvlModal = document.getElementById('lvlModal');
+  const lvlTitle = document.getElementById('lvlTitle');
+  const lvlBody = document.getElementById('lvlBody');
+  function openLvl(title) { lvlTitle.textContent = title; lvlBody.innerHTML = ''; lvlModal.hidden = false; }
+  function closeLvl() { lvlModal.hidden = true; }
+  function renderSupplies(data) {
+    if (!data.ok) { lvlBody.innerHTML = '<span class="lvl-err">' + escapeHtml(data.error || 'Check failed') + '</span>'; return; }
+    if (!data.supplies || !data.supplies.length) { lvlBody.innerHTML = '<span class="lvl-err">No supply data returned.</span>'; return; }
+    const chips = data.supplies.map(function (s) {
+      const cls = s.low ? 'lvl-chip low' : 'lvl-chip';
+      const warn = s.low ? '⚠ ' : '';
+      return '<span class="' + cls + '">' + warn + escapeHtml(s.name) + ': ' + escapeHtml(s.status) + '</span>';
+    }).join('');
+    lvlBody.innerHTML = '<div class="lvl-result">' + chips + '</div><div class="lvl-meta">via SNMP · ' + escapeHtml(data.ip || '') + '</div>';
+  }
+  function wireLvlBtn(btn) {
+    btn.addEventListener('click', function () {
+      const name = btn.dataset.name || 'Printer';
+      const model = btn.dataset.model || '';
+      openLvl(name + (model ? ' — ' + model : ''));
+      lvlBody.innerHTML = '<span class="muted">Checking…</span>';
+      fetch(SUP_BASE + btn.dataset.pk + '/supplies/')
+        .then(function (r) { return r.json(); })
+        .then(renderSupplies)
+        .catch(function () { lvlBody.innerHTML = '<span class="lvl-err">Request failed.</span>'; });
+    });
+  }
+  document.querySelectorAll('.lvl-btn').forEach(wireLvlBtn);
+  document.getElementById('lvlClose').addEventListener('click', closeLvl);
+  lvlModal.addEventListener('click', function (e) { if (e.target === lvlModal) closeLvl(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLvl(); });
+
+  // --- Queue columns (FMS / FMS 2 / DMS): hover popover -> "Add new queue?" modal ---
+  (function () {
+    const pop = document.getElementById('qPop');
+    const popKey = pop.querySelector('.q-pop-key');
+    const popBtn = document.getElementById('qPopBtn');
+    const modal = document.getElementById('qModal');
+
+    // The popover contains a BUTTON, so it has to survive the pointer travelling
+    // from the cell onto it. Hence a grace period: hide only after the pointer has
+    // left BOTH the cell and the popover, and position the popover flush against
+    // the cell's edge so there's no gap to cross on the way.
+    const HIDE_DELAY = 200;
+    let hideTimer = null, activeCell = null;
+
+    function cancelHide() {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    }
+    function hideNow() { cancelHide(); pop.hidden = true; activeCell = null; }
+    function scheduleHide() {
+      cancelHide();
+      hideTimer = setTimeout(hideNow, HIDE_DELAY);
+    }
+
+    function placePop(td) {
+      const r = td.getBoundingClientRect();
+      pop.hidden = false;  // must be rendered before it can be measured
+      const pw = pop.offsetWidth, ph = pop.offsetHeight;
+      let left = r.left + r.width / 2 - pw / 2;
+      left = Math.max(6, Math.min(left, window.innerWidth - pw - 6));
+      let top = r.bottom - 1;                                  // flush, no dead gap
+      if (top + ph > window.innerHeight - 6) top = r.top - ph + 1;  // flip above
+      pop.style.left = left + 'px';
+      pop.style.top = top + 'px';
+    }
+
+    function showPop(td) {
+      if (!modal.hidden) return;              // don't hover-pop behind the open modal
+      if (td.querySelector('input')) return;  // cell is being edited in place
+      cancelHide();
+      activeCell = td;
+      popKey.textContent = td.dataset.key || '';
+      placePop(td);
+    }
+
+    document.querySelectorAll('.q-col').forEach(function (td) {
+      td.addEventListener('mouseenter', function () { showPop(td); });
+      td.addEventListener('mouseleave', scheduleHide);
+    });
+    pop.addEventListener('mouseenter', cancelHide);
+    pop.addEventListener('mouseleave', scheduleHide);
+    // Fixed coords would drift away from the cell once anything scrolls (the table
+    // card scrolls independently), so drop the popover instead. Capture phase to
+    // catch the card's own scroll as well as the window's.
+    window.addEventListener('scroll', hideNow, true);
+
+    // ---- the bigger modal ----
+    const qTitle = document.getElementById('qTitle');
+    const qCtx = document.getElementById('qCtx');
+    const qCmd1 = document.getElementById('qCmd1');
+    const qCmd2 = document.getElementById('qCmd2');
+    const qLaser = document.getElementById('qLaser');
+    const qLabel = document.getElementById('qLabel');
+    const qAuto = document.getElementById('qAuto');
+    const qQr = document.getElementById('qQr');
+    const qQrErr = document.getElementById('qQrErr');
+    const qQueue = document.getElementById('qQueue');
+    const qDns = document.getElementById('qDns');
+    const kindRadios = Array.prototype.slice.call(modal.querySelectorAll('input[name="qKind"]'));
+    const qTicket = document.getElementById('qTicket');
+    const qReqName = document.getElementById('qReqName');
+    const qReqIp = document.getElementById('qReqIp');
+    const QR_URL = "{% url 'qr_svg' %}";
+    // Two different suffixes on purpose: the piomkjetd command wants a dotted FQDN
+    // (-h 'host.example.corp'), the PRINT-OPS ticket row wants the @ form.
+    const DNS_SUFFIX = '.example.corp';
+    const TICKET_SUFFIX = '@example.corp';
+    let ctx = {};
+
+    // Laser queue commands. Everything except the queue name and DNS name is a
+    // fixed literal (printer type hplj-4000, PCL, port 9100, page geometry).
+    // Placeholders in the samples these came from: queue 'tafwp108',
+    // host 'tafw-pr108'. Note cmd 1 wants the FQDN (<dns> + DNS_SUFFIX) while
+    // cmd 2's -d wants the bare DNS name behind "hp@".
+    function laserCommands() {
+      const q = qQueue.value.trim();
+      const dns = qDns.value.trim();
+      const fqdn = dns ? dns + DNS_SUFFIX : '';
+      return [
+        "sudo /usr/lib/lpd/pio/etc/piomkjetd mkpq_jetdirect -p 'hplj-4000' -D pcl -q '" +
+          q + "' -h '" + fqdn + "' -x '9100'",
+        "sudo /usr/lib/lpd/pio/etc/piochpq -q '" + q + "' -d 'hp@" + dns +
+          "' -p '17' -l '66' -w '180' -z '+';"
+      ];
+    }
+
+    function currentKind() {
+      const picked = kindRadios.filter(function (r) { return r.checked; })[0];
+      return picked ? picked.value : 'laser';
+    }
+
+    // Body for the PRINT-OPS ticket: a prntab row of
+    // queue | dns@example.corp | <type> printer | model-on-record.
+    function ticketText() {
+      const q = qQueue.value.trim();
+      const dns = qDns.value.trim();
+      const host = dns ? dns + TICKET_SUFFIX : '';
+      const type = currentKind() + ' printer';
+      return 'Please add the following ' + type + ' to the FMS/WMS prntab table:\n\n' +
+        [q, host, type, ctx.MODEL || ''].join(' | ') +
+        '\n\nRegards,';
+    }
+
+    // Debounced so typing doesn't fire a request per keystroke; identical text is
+    // served from the browser cache anyway (the endpoint sets Cache-Control).
+    let qrTimer = null;
+    function refreshQr(text) {
+      if (qrTimer) clearTimeout(qrTimer);
+      qrTimer = setTimeout(function () {
+        qQrErr.hidden = true;
+        qQr.hidden = false;
+        qQr.src = QR_URL + '?text=' + encodeURIComponent(text) + '&scale=4';
+      }, 250);
+    }
+    qQr.addEventListener('error', function () {
+      // An <img> can't read the response body, so re-request to show the real
+      // reason (400 = text too long, 503 = segno not installed yet).
+      const failed = qQr.src;
+      qQr.hidden = true;
+      qQrErr.hidden = false;
+      qQrErr.textContent = 'QR generation failed.';
+      fetch(failed).then(function (r) { return r.text(); }).then(function (t) {
+        if (t) qQrErr.textContent = t;
+      }).catch(function () { /* keep the generic message */ });
+    });
+
+    function update() {
+      // The DNS-request block applies to both printer types, so it updates first
+      // and outside the laser/label branch below.
+      const dns = qDns.value.trim();
+      qReqName.textContent = dns ? dns + TICKET_SUFFIX : '—';
+      qReqIp.textContent = ctx.IP || '—';
+
+      const laser = currentKind() === 'laser';
+      qLaser.hidden = !laser;
+      qLabel.hidden = laser;
+      if (!laser) {
+        // No label commands defined yet, so there's nothing to encode.
+        qQr.hidden = true;
+        qQrErr.hidden = true;
+        return;
+      }
+      const cmds = laserCommands();
+      qCmd1.textContent = cmds[0];
+      qCmd2.textContent = cmds[1];
+      qTicket.textContent = ticketText();
+      // QR mirrors the two commands only — the ticket is copy-paste, not scanned.
+      refreshQr(cmds.join('\n'));
+    }
+    [qQueue, qDns].forEach(function (i) { i.addEventListener('input', update); });
+    kindRadios.forEach(function (r) { r.addEventListener('change', update); });
+
+    // Click (or Enter/Space) any copy box to copy just that box's text.
+    modal.querySelectorAll('.q-copy').forEach(function (box) {
+      function copyBox() {
+        copyText(box.textContent || '');
+        box.classList.add('copied');
+        setTimeout(function () { box.classList.remove('copied'); }, 1200);
+      }
+      box.addEventListener('click', copyBox);
+      box.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copyBox(); }
+      });
+    });
+
+    function openModal(td) {
+      const tr = td.closest('tr');
+      ctx = {
+        IP: tr.dataset.ip || '',
+        NAME: tr.dataset.name || '',
+        TAG: tr.dataset.tag || '',
+        MODEL: tr.dataset.model || '',
+        FIELD: td.dataset.key || ''
+      };
+      qTitle.textContent = 'Add new queue — ' + (ctx.FIELD || '');
+      qCtx.innerHTML = 'Printer <strong>' + escapeHtml(ctx.NAME || '—') + '</strong>' +
+        ' · asset <strong>' + escapeHtml(ctx.TAG || '—') + '</strong>' +
+        ' · IP <strong>' + escapeHtml(ctx.IP || '—') + '</strong>' +
+        ' · field <strong>' + escapeHtml(ctx.FIELD) + '</strong>';
+      qQueue.value = td.dataset.val || '';   // seed with the cell's current value
+      qDns.value = '';
+
+      // Preselect Label/Laser from the record (server-computed in views._printer_kind,
+      // which reads model category first and falls back to manufacturer). Still fully
+      // overridable — note in the UI where the default came from.
+      const kind = (tr.dataset.kind === 'label') ? 'label' : 'laser';
+      kindRadios.forEach(function (r) { r.checked = (r.value === kind); });
+      qAuto.textContent = 'from record: ' + (tr.dataset.category || 'no category');
+
+      modal.hidden = false;
+      update();
+      qQueue.focus();
+    }
+    popBtn.addEventListener('click', function () {
+      if (!activeCell) return;
+      const td = activeCell;
+      hideNow();
+      openModal(td);
+    });
+
+    function closeModal() { modal.hidden = true; }
+    document.getElementById('qClose').addEventListener('click', closeModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
+  })();
+
+  // --- Auto-probe every supported printer on load: color rows + station headers,
+  //     and show chips for just the LOW supplies inline in the Levels cell.
+  //     Reuses the impressions page's worker-pool pattern (queue drained by N workers).
+  (function () {
+    const buttons = Array.prototype.slice.call(document.querySelectorAll('.lvl-btn'));
+    const progress = document.getElementById('lvlProgress');
+    if (!buttons.length) { if (progress) progress.textContent = ''; return; }
+
+    const CONCURRENCY = 8;
+    const total = buttons.length;
+    const queue = buttons.slice();
+    let done = 0, lowCount = 0;
+
+    // "Black Toner Cartridge" -> "Black"; keep the distinctive word, drop generic ones.
+    function shortName(name) {
+      const stripped = (name || '')
+        .replace(/\b(cartridge|toner|ink|drum|imaging|unit|developer|photoconductor|opc)\b/gi, '')
+        .replace(/\s+/g, ' ').trim();
+      return stripped || name || 'Supply';
+    }
+
+    function setProgress() {
+      if (!progress) return;
+      if (done < total) {
+        progress.textContent = 'Checking supply levels… ' + done + ' / ' + total;
+      } else {
+        progress.innerHTML = lowCount
+          ? '<span style="color:#991b1b; font-weight:600;">⚠ ' + lowCount + ' printer(s) low on supplies</span>'
+          : '<span style="color:var(--green);">All checked printers OK</span>';
+      }
+    }
+
+    function paintCell(cell, row, btn, status, lowSupplies, errText) {
+      row.classList.remove('sup-low', 'sup-ok', 'sup-unknown');
+      row.classList.add('sup-' + status);
+      let inner;
+      if (status === 'low') {
+        inner = lowSupplies.map(function (s) {
+          const pct = (s.percent != null) ? (' ' + s.percent + '%') : '';
+          return '<span class="lvl-chip low lvl-mini" title="' +
+            escapeHtml(s.name) + ': ' + escapeHtml(s.status) + '">⚠ ' +
+            escapeHtml(shortName(s.name)) + pct + '</span>';
+        }).join('');
+      } else if (status === 'ok') {
+        inner = '<span class="lvl-ok" title="All supplies OK">✓ OK</span>';
+      } else {
+        inner = '<span class="lvl-unknown" title="' + escapeHtml(errText || 'No data') + '">?</span>';
+      }
+      cell.innerHTML = '<div class="lvl-inline">' + inner +
+        '<button class="btn small lvl-btn" type="button" data-pk="' + escapeHtml(btn.dataset.pk || '') +
+        '" data-name="' + escapeHtml(btn.dataset.name || '') +
+        '" data-model="' + escapeHtml(btn.dataset.model || '') +
+        '" title="Check supply levels">+</button></div>';
+      wireLvlBtn(cell.querySelector('.lvl-btn'));  // re-wire the freshly created "+"
+    }
+
+    // Tint the row's station header and keep a running "N low" badge on it.
+    function rollupHeader(row) {
+      const header = document.querySelector('.grp[data-grp="' + row.dataset.grp + '"]');
+      if (!header) return;
+      const td = header.querySelector('td');
+      let badge = td.querySelector('.grp-badge');
+      if (!badge) {
+        header.classList.add('grp-low');
+        badge = document.createElement('span');
+        badge.className = 'grp-badge';
+        badge.dataset.n = '0';
+        td.appendChild(badge);
+      }
+      const n = parseInt(badge.dataset.n, 10) + 1;
+      badge.dataset.n = String(n);
+      badge.textContent = '⚠ ' + n + ' low';
+    }
+
+    async function probe(btn) {
+      const row = btn.closest('tr');
+      const cell = btn.closest('.lvl-cell');
+      try {
+        const r = await fetch(SUP_BASE + btn.dataset.pk + '/supplies/');
+        const data = await r.json();
+        if (!data.ok) { paintCell(cell, row, btn, 'unknown', [], data.error || 'No data'); return; }
+        const low = (data.supplies || []).filter(function (s) { return s.low; });
+        if (low.length) {
+          paintCell(cell, row, btn, 'low', low, '');
+          lowCount += 1;
+          rollupHeader(row);
+        } else {
+          paintCell(cell, row, btn, 'ok', [], '');
+        }
+      } catch (e) {
+        paintCell(cell, row, btn, 'unknown', [], 'Request failed');
+      } finally {
+        done += 1;
+        setProgress();
+      }
+    }
+
+    async function worker() {
+      while (queue.length) { await probe(queue.shift()); }
+    }
+
+    setProgress();
+    for (let i = 0; i < Math.min(CONCURRENCY, total); i += 1) worker();
+  })();
+
+  // --- Comments modal ---
+  const modal = document.getElementById('cmtModal');
+  const cmtText = document.getElementById('cmtText');
+  const cmtCopied = document.getElementById('cmtCopied');
+  function openModal(text) { cmtText.textContent = text; cmtCopied.textContent = ''; modal.hidden = false; }
+  function closeModal() { modal.hidden = true; }
+  document.querySelectorAll('.cmt-link').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      const full = a.parentElement.querySelector('.cmt-full');
+      openModal(full ? full.textContent : '');
+    });
+  });
+  document.getElementById('cmtClose').addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
+  document.getElementById('cmtCopy').addEventListener('click', function () {
+    const text = cmtText.textContent;
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(fallbackCopy.bind(null, text));
+    } else { fallbackCopy(text); }
+    cmtCopied.textContent = 'Copied!';
+  });
+  function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+</script>
+{% endblock %}

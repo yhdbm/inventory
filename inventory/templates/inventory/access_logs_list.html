@@ -1,0 +1,77 @@
+{% extends "inventory/base.html" %}
+{% block title %}Access Log{% endblock %}
+{% block content %}
+
+<style>
+  .al-table { font-size: 13px; width: 100%; border-collapse: collapse; }
+  .al-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .al-table td, .al-table th { padding: 8px 10px; vertical-align: middle; text-align: left; }
+  .al-card { max-height: 76vh; overflow: auto; }
+  .al-table thead th { position: sticky; top: 0; z-index: 3; background: #eef2f7;
+                       box-shadow: inset 0 -1px 0 var(--line); }
+  /* Date group header (click to expand its IPs). */
+  .al-day > td { cursor: pointer; background: #fafbfc; font-weight: 700; font-size: 14px;
+                 border-top: 2px solid #cbd5e1; }
+  .al-day:hover > td { background: #eef2f7; }
+  .caret { display: inline-block; width: 14px; color: var(--muted); transition: transform .12s ease; }
+  .caret::before { content: "▶"; font-size: 10px; }
+  .al-day.open .caret { transform: rotate(90deg); }
+  .al-ip > td { border-bottom: 1px solid var(--line); }
+  .al-ip .ip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600;
+               padding-left: 22px; }
+  .al-count { display: inline-block; min-width: 26px; text-align: center; padding: 1px 8px;
+              border-radius: 999px; background: #eef2f7; border: 1px solid var(--line); font-size: 12px; }
+</style>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Access Log</h1>
+    <span class="muted">{{ total_hits }} page view(s)</span>
+  </div>
+  <p class="muted" style="margin:6px 0 0;">Page views per day. Click a date to see the count per
+    source IP and signed-in user. Reads don't require an account, so the user is blank for
+    anonymous visits (and for anything logged before accounts existed).</p>
+</div>
+
+<div class="card al-card">
+  <table class="al-table">
+    <thead>
+      <tr><th>Date</th><th>IP address</th><th>User</th><th>Visits</th></tr>
+    </thead>
+    <tbody>
+      {% for g in day_groups %}
+      <tr class="al-day" data-di="{{ forloop.counter0 }}">
+        <td><span class="caret"></span>{{ g.date|date:"Y-m-d" }}</td>
+        <td class="muted">{{ g.ips }} IP{{ g.ips|pluralize }}</td>
+        <td></td>
+        <td><span class="al-count">{{ g.total }}</span></td>
+      </tr>
+      {% for r in g.rows %}
+      <tr class="al-ip" data-di="{{ forloop.parentloop.counter0 }}" hidden>
+        <td></td>
+        <td class="ip">{{ r.ip|default:"—" }}</td>
+        <td>{{ r.user|default:"—" }}</td>
+        <td><span class="al-count">{{ r.count }}</span></td>
+      </tr>
+      {% endfor %}
+      {% empty %}
+      <tr><td colspan="4" class="muted">No page views recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  // Expand/collapse a date's per-IP rows.
+  document.querySelectorAll(".al-day").forEach(function (day) {
+    day.addEventListener("click", function () {
+      var di = day.dataset.di;
+      var open = day.classList.toggle("open");
+      document.querySelectorAll('.al-ip[data-di="' + di + '"]').forEach(function (r) {
+        r.hidden = !open;
+      });
+    });
+  });
+</script>
+
+{% endblock %}

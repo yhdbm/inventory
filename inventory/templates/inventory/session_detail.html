@@ -1,0 +1,118 @@
+{% extends "inventory/base.html" %}
+{% block title %}{{ session.name }} — Reconciliation{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+    <div>
+      <h1 style="margin-bottom:4px;">{{ session.name }}</h1>
+      <p class="muted" style="margin:0;">
+        Match key: <strong>{{ session.asset_tag_column|default:"(not set)" }}</strong>
+        · {{ report.total_expected }} expected · {{ report.total_scanned }} scanned
+      </p>
+      {% if session.description %}<p style="margin:8px 0 0;">{{ session.description }}</p>{% endif %}
+    </div>
+    <div>
+      <a class="btn secondary small" href="{% url 'export_report' session.pk %}">Export CSV</a>
+      <a class="btn secondary small" href="{% url 'session_map_columns' session.pk %}">Re-map / re-import</a>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="stats">
+    <div class="stat"><div class="n" style="color:var(--green)">{{ report.counts.match }}</div><div class="l">Match</div></div>
+    <div class="stat"><div class="n" style="color:var(--amber)">{{ report.counts.mismatch }}</div><div class="l">Field mismatch</div></div>
+    <div class="stat"><div class="n" style="color:var(--red)">{{ report.counts.missing }}</div><div class="l">Missing (not scanned)</div></div>
+    <div class="stat"><div class="n" style="color:var(--gray)">{{ report.counts.unexpected }}</div><div class="l">Unexpected (not in sheet)</div></div>
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <h2>Scan / enter a device</h2>
+    {% if session.is_imported %}
+    <form method="post">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button class="btn" type="submit">Record scan</button>
+    </form>
+    {% else %}
+    <p class="muted">Import expected items first to enable scanning.</p>
+    <a class="btn" href="{% url 'session_map_columns' session.pk %}">Map columns &amp; import</a>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Recent scans ({{ scanned_items|length }})</h2>
+    {% if scanned_items %}
+    <table>
+      <thead><tr><th>Asset tag</th><th>By</th><th>When</th><th></th></tr></thead>
+      <tbody>
+        {% for s in scanned_items %}
+        <tr>
+          <td>{{ s.asset_tag }}</td>
+          <td class="muted">{{ s.scanned_by|default:"—" }}</td>
+          <td class="muted">{{ s.scanned_at|date:"H:i:s" }}</td>
+          <td>
+            <form class="inline-form" method="post" action="{% url 'scan_delete' session.pk s.pk %}">
+              {% csrf_token %}
+              <button class="btn danger small" type="submit">×</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No scans recorded yet.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Comparison report</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Asset tag</th>
+        <th>Status</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in report.rows %}
+      <tr>
+        <td><strong>{{ row.asset_tag }}</strong></td>
+        <td><span class="pill {{ row.status }}">{{ row.status_label }}</span></td>
+        <td>
+          {% if row.status == "mismatch" %}
+            {% for d in row.field_diffs %}{% if d.differs %}
+              <div><strong>{{ d.column }}:</strong>
+                expected <span class="diff">{{ d.expected|default:"(blank)" }}</span>,
+                scanned <span class="diff">{{ d.scanned|default:"(blank)" }}</span></div>
+            {% endif %}{% endfor %}
+          {% elif row.status == "missing" %}
+            <span class="muted">In spreadsheet but never scanned.</span>
+          {% elif row.status == "unexpected" %}
+            <span class="muted">Scanned but not in the spreadsheet.</span>
+          {% else %}
+            <span class="muted">All fields match.</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="3" class="muted">Nothing to compare yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <form method="post" action="{% url 'session_delete' session.pk %}"
+        onsubmit="return confirm('Delete this whole session?');">
+    {% csrf_token %}
+    <button class="btn danger small" type="submit">Delete session</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,111 @@
+{% extends "inventory/base.html" %}
+{% block title %}Saved corrections{% endblock %}
+{% block content %}
+
+<style>
+  .change-row { display:flex; align-items:center; justify-content:space-between;
+                gap:10px; padding:2px 0; }
+  .change-row .btn.small { padding:2px 8px; line-height:1.2; }
+</style>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Saved corrections</h1>
+    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <a class="btn secondary small" href="{% url 'corrections_export' %}?format=json&status=pending&download=1">Export JSON</a>
+      <a class="btn secondary small" href="{% url 'corrections_export' %}?format=csv&status=pending">Export CSV</a>
+      <form method="post" action="{% url 'corrections_delete_pending' %}" class="inline-form"
+            onsubmit="return confirm('Delete ALL pending corrections? This cannot be undone.');">
+        {% csrf_token %}
+        <button class="btn danger small" type="submit"
+                {% if not can_write %}disabled{% endif %}
+                title="Delete every pending correction">Delete all pending</button>
+      </form>
+      <a class="btn small" href="{% url 'audit' %}">← Back to Reconcile</a>
+    </div>
+  </div>
+  <p class="muted">
+    These are the differences saved during auditing, for the Chrome extension to
+    apply to the source web page. JSON endpoint:
+    <code>{% url 'corrections_export' %}?format=json&amp;status=pending</code>
+  </p>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>Asset tag</th><th>Status</th><th>Changes (current → expected)</th><th>Updated</th><th>By</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in corrections %}
+      <tr>
+        <td><strong>{{ c.asset_tag|default:"—" }}</strong></td>
+        <td><span class="pill {% if c.status == 'applied' %}match{% else %}mismatch{% endif %}">{{ c.status }}</span></td>
+        <td>
+          {% for row in c.diff_rows %}
+            <div class="change-row">
+              <span><strong>{{ row.label }}:</strong>
+                <span class="diff">{{ row.current|default:"(blank)" }}</span> →
+                <span class="diff">{{ row.expected|default:"(blank)" }}</span></span>
+              <form class="inline-form" method="post"
+                    action="{% url 'correction_delete_change' c.pk row.field %}">
+                {% csrf_token %}
+                <button class="btn danger small" type="submit"
+                        {% if not can_write %}disabled{% endif %}
+                        title="Delete this change">✕</button>
+              </form>
+            </div>
+          {% empty %}
+            <span class="muted">No differences (expected values match current).</span>
+          {% endfor %}
+        </td>
+        <td class="muted">{{ c.updated_at|date:"Y-m-d H:i" }}</td>
+        {# Blank for rows saved before accounts existed. #}
+        <td class="muted">{{ c.updated_by.get_username|default:"—" }}</td>
+        <td>
+          <form method="post" action="{% url 'correction_delete' c.pk %}"
+                onsubmit="return confirm('Delete this whole correction?');">
+            {% csrf_token %}
+            <button class="btn danger small" type="submit"
+                    {% if not can_write %}disabled{% endif %}
+                    title="Delete the whole correction">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="muted">No corrections saved yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h2 style="margin:0;">Notes</h2>
+    <span class="muted">Added on the Reconcile page · not affected by “Delete all pending”</span>
+  </div>
+  <table style="margin-top:10px;">
+    <thead>
+      <tr><th style="width:160px;">When</th><th>Note</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for n in notes %}
+      <tr>
+        <td class="muted">{{ n.created_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ n.text|linebreaksbr }}</td>
+        <td>
+          <form method="post" action="{% url 'note_delete' n.pk %}" class="inline-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'corrections_list' %}">
+            <button class="btn danger small" type="submit"
+                    {% if not can_write %}disabled{% endif %}>Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="3" class="muted">No notes yet. Add them on the Reconcile page.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

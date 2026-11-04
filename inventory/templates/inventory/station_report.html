@@ -1,0 +1,404 @@
+{% extends "inventory/base.html" %}
+{% load static %}
+{% block title %}Station report ({{ warehouse.label|default:"all sites" }}){% endblock %}
+{% block content %}
+
+<style>
+  /* Model category × State pivot (each cell: green=has 202606 / yellow=hasn't). */
+  .matrix-table { width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; min-width:880px; }
+  .matrix-table th, .matrix-table td { padding:5px 8px; border-bottom:1px solid var(--line);
+                                       text-align:left; white-space:nowrap; }
+  /* Equal-width, centered value columns. */
+  .matrix-table th.num, .matrix-table td.num { width:82px; text-align:center;
+                                               font-variant-numeric:tabular-nums; }
+  .matrix-table thead th { position:sticky; top:0; z-index:2; background:#eef2f7;
+                           font-size:11px; text-transform:uppercase; letter-spacing:.02em; }
+  .matrix-table tfoot td { border-top:2px solid #cbd5e1; background:#fafbfc; }
+  .matrix-table tbody tr:hover { background:#f8fafc; }
+  .matrix-table .ret-col { background:#fff7ed; }
+  .matrix-table .retsub-col { background:#fffbeb; }   /* retired substates — always visible */
+  /* Compact button-boxes: accent (blue) = audited (202606), amber = not audited.
+     Minimal padding to save space; the two boxes sit side by side, no "/". */
+  .matrix-table .mv, .matrix-table .uv { display:inline-block; padding:0 4px; margin:0 1px;
+      border-radius:4px; font-weight:700; font-size:12px; line-height:1.55; text-decoration:none;
+      border:1px solid; }
+  .matrix-table .mv { background:var(--accent); border-color:var(--accent); color:#fff; }   /* audited */
+  .matrix-table .uv { background:#fde68a; border-color:#f59e0b; color:#7c2d12; }             /* not audited */
+  .matrix-table .mv:hover, .matrix-table .uv:hover { filter:brightness(1.08); }
+  /* Tabbed report (Active / All states). */
+  .rpt-tabs { display:flex; gap:4px; border-bottom:2px solid var(--line); margin:8px 0 4px; }
+  .rpt-tab { background:none; border:0; border-bottom:2px solid transparent; margin-bottom:-2px;
+             padding:8px 14px; font-size:14px; font-weight:600; cursor:pointer; color:var(--muted); }
+  .rpt-tab:hover { color:var(--ink); }
+  .rpt-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .rpt-tab .rpt-sub { font-weight:400; font-size:11px; }
+  .rpt-pane { display:none; }
+  .rpt-pane.active { display:block; }
+  .station-table { font-size: 13px; }
+  .station-table th { font-size: 11px; }
+  .station-table td, .station-table th { padding: 6px 8px; vertical-align: top; }
+  .station-id { font-weight: 700; white-space: nowrap; font-size: 14px; }
+  .name-cell { white-space: nowrap; }
+  .qty-badge { background: var(--bg); border: 1px solid var(--line); border-radius: 999px;
+               padding: 1px 8px; font-size: 11px; font-weight: 700; }
+  .sid-col { background: #fafbfc; border-right: 2px solid var(--line); }
+  .name-col { border-right: 1px solid var(--line); }
+  .station-table tr.station-start > td { border-top: 2px solid #cbd5e1; }
+  .inv-dot { display:inline-block; width:9px; height:9px; border-radius:50%;
+             background:#16a34a; margin-left:6px; vertical-align:middle; }
+  .donut { width:380px; height:380px; border-radius:50%; flex:none; }
+  .donut-hole { position:absolute; inset:76px; background:var(--card); border-radius:50%;
+                display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .donut-hole .pct { font-size:56px; font-weight:700; }
+  .donut-hole .lbl { font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .legend-row { display:flex; align-items:center; gap:8px; margin:4px 0; font-size:14px; }
+  .swatch { display:inline-block; width:13px; height:13px; border-radius:3px; }
+
+  /* Inventoried-per-category range bars */
+  .cat-panel { flex:1 1 0; min-width:0;
+               border-left:1px solid var(--line); padding-left:20px; }
+  .cat-panel:first-child { border-left:none; padding-left:0; }
+  .cat-panel h3 { margin:0 0 10px; font-size:13px; text-transform:uppercase;
+                  letter-spacing:.03em; color:var(--muted); }
+  .cat-row { margin-bottom:9px; }
+  .cat-row[data-url] { cursor:pointer; border-radius:6px; padding:2px 4px; margin-left:-4px; transition:background .12s; }
+  .cat-row[data-url]:hover { background:#dbeafe; }
+  .cat-row .cat-name { font-weight:600; font-size:12px; display:block; margin-bottom:2px; }
+  .cat-line { display:flex; align-items:center; gap:8px; }
+  .cat-row .cat-count { color:var(--muted); font-size:12px; white-space:nowrap; }
+  /* Retired sits at the bottom of the state list, with its Substate bars
+     boxed beneath it. */
+  .cat-retired { margin-top:12px; padding-top:11px; border-top:1px solid var(--line); }
+  .cat-substates { margin:6px 0 2px 14px; padding:8px 10px; border:1px solid var(--line);
+                   border-radius:8px; background:#fafafa; }
+  .cat-sub { margin-top:8px; margin-bottom:0; }
+  .cat-sub:first-child { margin-top:0; }
+  .cat-sub .cat-name { font-weight:500; font-size:11px; color:var(--muted); }
+  /* Two-segment clickable bar: blue = inventoried, amber = still pending */
+  .cat-bar { display:flex; flex:1; height:12px; border-radius:6px; overflow:hidden;
+             border:1px solid var(--line); background:#fef3c7; }
+  .cat-seg { height:100%; cursor:pointer; transition:filter .12s; }
+  .cat-seg.blue { background:var(--accent); flex:0 0 auto; }
+  .cat-seg.pend { background:#f59e0b; flex:1 1 auto; }
+  .cat-seg:hover { filter:brightness(1.12); }
+  .cat-group { cursor:pointer; font-size:12px; font-weight:600; color:var(--muted);
+               margin:8px 0; user-select:none; }
+  .cat-group.open .caret { transform:rotate(90deg); }
+
+  /* Collapsible tree: Station ID -> Name -> assets */
+  .caret { display:inline-block; width:14px; color:var(--muted); transition:transform .12s ease; }
+  .caret::before { content:"▶"; font-size:10px; }
+  tr.open > td > .caret { transform:rotate(90deg); }
+  .lvl-station > td { cursor:pointer; background:#fafbfc; font-weight:700; font-size:14px;
+                      border-top:2px solid #cbd5e1; }
+  .lvl-station > td:hover, .lvl-name > td:hover { background:#eef2f7; }
+  .lvl-name > td { cursor:pointer; padding-left:30px; }
+  .lvl-asset > td:nth-child(2) { padding-left:52px; }
+  .chk-col { width:34px; text-align:center; }
+  .chk-col input { cursor:pointer; }
+  .sel-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+  .sel-toolbar .muted { font-size:13px; }
+  /* "Get source from ServiceNow" pill on the Asset source card. */
+  .lnk-ico { width:15px; height:15px; vertical-align:middle; margin-left:6px; }
+  .snow-export { display:inline-flex; align-items:center; font-size:12px; font-weight:600;
+                 text-decoration:none; color:var(--accent); background:var(--card);
+                 border:1px solid var(--line); border-radius:999px; padding:3px 10px; }
+  .snow-export:hover { border-color:var(--accent); background:#eef6ff; }
+</style>
+
+{% if can_write %}
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <h2 style="margin:0;">Asset source</h2>
+      <a class="snow-export" href="{{ snow_asset_export_url }}" target="_blank" rel="noopener"
+         title="Open the saved alm_asset list in ServiceNow, then use its export menu to download a fresh .xlsx">Get
+        source from ServiceNow<img class="lnk-ico" src="{% static 'inventory/snow.jpg' %}" alt="SNOW"></a>
+    </div>
+    {% if latest_import %}
+    <span class="muted">
+      Current: <strong>{{ latest_import.filename }}</strong> ·
+      {{ latest_import.row_count }} rows ·
+      file created {% if latest_import.file_created %}{{ latest_import.file_created|date:"Y-m-d H:i" }}{% else %}unknown{% endif %} ·
+      loaded {{ latest_import.imported_at|date:"Y-m-d H:i" }}
+    </span>
+    {% else %}
+    <span class="muted">No source uploaded yet.</span>
+    {% endif %}
+  </div>
+
+  <form method="post" enctype="multipart/form-data" action="{% url 'asset_list' %}" style="margin-top:14px;"
+        onsubmit="return confirm('Replace ALL current assets with this file? The previous data will be removed.');">
+    {% csrf_token %}
+    <label for="source">Upload a new alm_asset .xlsx (replaces the current data)</label>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <input type="file" id="source" name="source" accept=".xlsx" required style="flex:1; min-width:260px;">
+      <button class="btn" type="submit">Upload &amp; replace</button>
+    </div>
+    <p class="muted" style="margin:8px 0 0;">Nothing happens until you press the button.</p>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Station report — {{ warehouse.label|default:"all sites" }}</h1>
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      {% comment %}
+        "Untagged" = in scope only because of its Location, i.e. no "<code>|…"
+        Station ID yet. That number IS the retagging backlog.
+      {% endcomment %}
+      <span class="muted">{{ unique_stations }} unique Station ID(s) · {{ total_assets }} assets ·
+        <strong>{{ warehouse.code }}| tagged:</strong> {{ tagged_count }} ·
+        <strong title="In scope by Location, with no {{ warehouse.code }}| Station ID yet">untagged:</strong> {{ untagged_count }}</span>
+      <form method="post" action="{% url 'station_snapshot_save' %}" class="inline-form">
+        {% csrf_token %}
+        <button class="btn small" type="submit"
+                {% if not can_write %}disabled{% endif %}
+                title="Record these totals with today's date">📸 Save snapshot</button>
+      </form>
+      <a class="btn secondary small" href="{% url 'snapshots_list' %}">History ({{ snapshot_count }})</a>
+    </div>
+  </div>
+  <p class="muted">
+    Grouped by Station ID → Name → devices. <strong>{{ warehouse.code }}|</strong> stations first,
+    no-Station-ID last. Each Station ID and Name links to its matching assets in
+    ServiceNow.
+  </p>
+
+  <div class="rpt-tabs">
+    <button type="button" class="rpt-tab active" data-tab="active">Active
+      <span class="rpt-sub">excl. Missing / Retired</span></button>
+    <button type="button" class="rpt-tab" data-tab="all">All states</button>
+  </div>
+  <div class="rpt-pane active" data-pane="active">
+    {% include "inventory/_report_panels.html" with b=bundle_active %}
+  </div>
+  <div class="rpt-pane" data-pane="all">
+    {% include "inventory/_report_panels.html" with b=bundle_all %}
+  </div>
+</div>
+
+{% if cat_state_matrix.rows %}
+<div class="card" style="overflow-x:auto;">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px;">
+    <h2 style="margin:0; font-size:16px;">Devices by category &amp; state</h2>
+    <span class="muted" style="font-size:12px;">Each cell shows
+      <span class="mv">audited</span> <span class="uv">not audited</span> — i.e. GL account has the
+      <strong>202606</strong> code or not. Click a box to open that list in ServiceNow.</span>
+  </div>
+  <table class="matrix-table" id="catStateMatrix">
+    <thead>
+      <tr>
+        <th>Model category</th>
+        {% for c in cat_state_matrix.columns %}
+          <th class="num{% if forloop.last and cat_state_matrix.retired_present %} ret-col{% endif %}">{{ c }}</th>
+        {% endfor %}
+        {% for s in cat_state_matrix.retired_subcols %}<th class="num retsub-col">↳ {{ s }}</th>{% endfor %}
+        <th class="num">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in cat_state_matrix.rows %}
+      <tr>
+        <td>{{ r.category }}</td>
+        {% for c in r.cells %}
+          <td class="num{% if forloop.last and cat_state_matrix.retired_present %} ret-col{% endif %}">{% include "inventory/_matrix_cell.html" %}</td>
+        {% endfor %}
+        {% for c in r.retired_cells %}<td class="num retsub-col">{% include "inventory/_matrix_cell.html" %}</td>{% endfor %}
+        <td class="num">{% include "inventory/_matrix_cell.html" with c=r.total_cell %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td>Total</td>
+        {% for c in cat_state_matrix.col_totals %}
+          <td class="num{% if forloop.last and cat_state_matrix.retired_present %} ret-col{% endif %}">{% include "inventory/_matrix_cell.html" %}</td>
+        {% endfor %}
+        {% for c in cat_state_matrix.retired_col_totals %}<td class="num retsub-col">{% include "inventory/_matrix_cell.html" %}</td>{% endfor %}
+        <td class="num">{% include "inventory/_matrix_cell.html" with c=cat_state_matrix.grand_cell %}</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endif %}
+
+<div class="card" style="overflow-x:auto;">
+  <div class="sel-toolbar">
+    <button type="button" id="snowSelectedBtn" class="btn" disabled>
+      Open selected in ServiceNow ↗</button>
+    <span class="muted" id="selCount">No rows selected.</span>
+  </div>
+  <table class="station-table">
+    <thead>
+      <tr>
+        <th class="chk-col"></th>
+        <th>Asset tag</th><th>Category</th><th>Display name</th><th>Model</th>
+        <th>Manufacturer</th><th>State</th><th>Substate</th><th>Location</th>
+        <th>Department</th><th>GL account</th><th>Assigned to</th><th>SNOW</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr class="lvl-station" data-si="{{ forloop.counter0 }}">
+          <td class="chk-col">
+            <input type="checkbox" class="sel-chk" data-tags="{{ row.tags|join:"," }}">
+          </td>
+          <td colspan="12">
+            <span class="caret"></span>
+            <span class="station-id">{{ row.station_id }}</span>
+            <span class="muted" style="margin-left:8px; font-weight:400;">
+              {{ row.count }} asset(s) · {{ row.distinct_names }} name(s)</span>
+            {% if row.snow_url %}
+              <a href="{{ row.snow_url }}" target="_blank" rel="noopener"
+                 style="margin-left:8px; font-weight:400;">open in ServiceNow ↗</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% for n in row.name_rows %}
+          <tr class="lvl-name" data-si="{{ forloop.parentloop.counter0 }}"
+              data-ni="{{ forloop.counter0 }}" hidden>
+            <td class="chk-col">
+              <input type="checkbox" class="sel-chk" data-tags="{{ n.tags|join:"," }}">
+            </td>
+            <td colspan="12">
+              <span class="caret"></span>
+              <span class="qty-badge">×{{ n.count }}</span>
+              {% if n.snow_url %}
+                <a href="{{ n.snow_url }}" target="_blank" rel="noopener">{{ n.name }} ↗</a>
+              {% else %}{{ n.name }}{% endif %}
+            </td>
+          </tr>
+          {% for a in n.assets %}
+          <tr class="lvl-asset" data-si="{{ forloop.parentloop.parentloop.counter0 }}"
+              data-ni="{{ forloop.parentloop.counter0 }}" hidden>
+            <td class="chk-col">
+              {% if a.asset_tag %}<input type="checkbox" class="sel-chk" data-tags="{{ a.asset_tag }}">{% endif %}
+            </td>
+            <td>
+              <strong>{{ a.asset_tag|default:"—" }}</strong>
+              {% if a.inventory_marked %}<span class="inv-dot" title="Marked for inventory (GL account 202606)"></span>{% endif %}
+            </td>
+            <td>{{ a.model_category|default:"—" }}</td>
+            <td>{{ a.display_name|default:"—" }}</td>
+            <td>{{ a.model|default:"—" }}</td>
+            <td>{{ a.manufacturer|default:"—" }}</td>
+            <td>{{ a.state|default:"—" }}</td>
+            <td>{{ a.substate|default:"—" }}</td>
+            <td>{{ a.location|default:"—" }}</td>
+            <td>{{ a.department|default:"—" }}</td>
+            <td>{{ a.gl_account|default:"—" }}</td>
+            <td>{{ a.assigned_to|default:"—" }}</td>
+            <td>
+              {% if a.snow_url %}<a href="{{ a.snow_url }}" target="_blank" rel="noopener">open ↗</a>{% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% endfor %}
+      {% empty %}
+        <tr><td colspan="13" class="muted">No assets found for {{ warehouse.label|default:"this site" }}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  // Station rows expand to reveal Name rows; Name rows expand to reveal assets.
+  document.querySelectorAll('.lvl-station').forEach(function (st) {
+    st.addEventListener('click', function (e) {
+      if (e.target.closest('a') || e.target.closest('.chk-col')) return;  // links / checkbox
+      var si = st.dataset.si;
+      var open = st.classList.toggle('open');
+      document.querySelectorAll('.lvl-name[data-si="' + si + '"]').forEach(function (nr) {
+        nr.hidden = !open;
+        if (!open) nr.classList.remove('open');     // reset names when collapsing
+      });
+      if (!open) {                                   // hide all assets under this station
+        document.querySelectorAll('.lvl-asset[data-si="' + si + '"]').forEach(function (ar) {
+          ar.hidden = true;
+        });
+      }
+    });
+  });
+  document.querySelectorAll('.lvl-name').forEach(function (nr) {
+    nr.addEventListener('click', function (e) {
+      if (e.target.closest('a') || e.target.closest('.chk-col')) return;
+      var si = nr.dataset.si, ni = nr.dataset.ni;
+      var open = nr.classList.toggle('open');
+      document.querySelectorAll('.lvl-asset[data-si="' + si + '"][data-ni="' + ni + '"]')
+        .forEach(function (ar) { ar.hidden = !open; });
+    });
+  });
+
+  // Collapsed "Not inventoried" groups — class-based so it works in every tab pane.
+  document.querySelectorAll('.rpt-pane .cat-group').forEach(function (g) {
+    g.addEventListener('click', function () {
+      var open = g.classList.toggle('open');
+      var body = g.nextElementSibling;
+      if (body && body.classList.contains('cat-none')) body.hidden = !open;
+    });
+  });
+
+  // Report tabs (Active / All states).
+  document.querySelectorAll('.rpt-tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      var name = t.dataset.tab;
+      document.querySelectorAll('.rpt-tab').forEach(function (x) { x.classList.toggle('active', x === t); });
+      document.querySelectorAll('.rpt-pane').forEach(function (p) {
+        p.classList.toggle('active', p.dataset.pane === name);
+      });
+    });
+  });
+
+  // Multi-select -> open all checked rows' assets in one ServiceNow list.
+  // Same double-encoded format as the server's snow_list_url().
+  var SNOW_BASE = "https://your-instance.service-now.com/now/nav/ui/classic/params/target/";
+  function snowListUrl(tags) {
+    if (!tags.length) return "";
+    var inner = encodeURIComponent(tags.map(function (t) { return "asset_tag=" + t; }).join("^OR"));
+    var target = encodeURIComponent(
+      "alm_asset_list.do?sysparm_query=" + inner + "&sysparm_first_row=1&sysparm_view=");
+    return SNOW_BASE + target;
+  }
+  function selectedTags() {
+    var set = new Set();
+    document.querySelectorAll('.sel-chk:checked').forEach(function (cb) {
+      (cb.dataset.tags || '').split(',').forEach(function (t) {
+        t = t.trim();
+        if (t) set.add(t);
+      });
+    });
+    return Array.from(set);
+  }
+  var snowBtn = document.getElementById('snowSelectedBtn');
+  var selCount = document.getElementById('selCount');
+  function refreshSelection() {
+    var tags = selectedTags();
+    snowBtn.disabled = tags.length === 0;
+    selCount.textContent = tags.length
+      ? tags.length + ' asset' + (tags.length === 1 ? '' : 's') + ' selected.'
+      : 'No rows selected.';
+  }
+  document.querySelectorAll('.sel-chk').forEach(function (cb) {
+    cb.addEventListener('change', refreshSelection);
+  });
+  snowBtn.addEventListener('click', function () {
+    var url = snowListUrl(selectedTags());
+    if (url) window.open(url, '_blank', 'noopener');
+  });
+
+  // Each breakdown range row links to its ServiceNow search. Clicking the blue
+  // (inventoried) part of the bar opens the full list; clicking the gray
+  // (pending) part opens the same list with "GL account NOT LIKE 202606".
+  document.querySelectorAll('.cat-row[data-url]').forEach(function (row) {
+    row.addEventListener('click', function (e) {
+      var blue = row.dataset.url;
+      var gray = row.dataset.urlPending || blue;
+      var seg = e.target.closest('.cat-seg');
+      var url = (seg && seg.classList.contains('pend')) ? gray : blue;
+      if (url) window.open(url, '_blank', 'noopener');
+    });
+  });
+</script>
+{% endblock %}

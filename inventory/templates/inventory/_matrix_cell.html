@@ -1,0 +1,3 @@
+{% comment %}One pivot cell: audited (has 202606) / not audited (hasn't) as compact
+button-boxes, each a SNOW link. Zeros are dropped; a 0/0 cell renders empty. Expects `c`.{% endcomment %}
+{% if c.m %}<a class="mv" href="{{ c.marked_url }}" target="_blank" rel="noopener" title="{{ c.m }} audited (GL account has 202606) — open in ServiceNow">{{ c.m }}</a>{% endif %}{% if c.u %}<a class="uv" href="{{ c.unmarked_url }}" target="_blank" rel="noopener" title="{{ c.u }} not audited (no 202606) — open in ServiceNow">{{ c.u }}</a>{% endif %}

@@ -1,0 +1,14 @@
+{% extends "inventory/base.html" %}
+{% block content %}
+<div class="card" style="max-width:560px;">
+  <h1>New reconciliation session</h1>
+  <p class="muted">Upload the inventory spreadsheet (the expected source of truth).
+     You'll pick the asset-tag column on the next step.</p>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button class="btn" type="submit">Upload &amp; continue</button>
+    <a class="btn secondary" href="{% url 'session_list' %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

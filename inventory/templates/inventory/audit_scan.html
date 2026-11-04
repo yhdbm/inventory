@@ -1,0 +1,684 @@
+{% extends "inventory/base.html" %}
+{% load static %}
+{% block title %}Audit{% endblock %}
+{% block content %}
+
+<style>
+  .scan-card { max-width: 760px; margin: 0 auto; }
+  #ascan { font-size: 18px; padding: 12px; }
+  /* GL-account signal on the scan box: green if GL account contains 202606,
+     red if it has a different value, no background if empty. */
+  #ascan.gl-ok  { background: #d1f0d8; }
+  #ascan.gl-bad { background: #f8d2d2; }
+  .as-identity { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 12px; }
+  .as-ident .l { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+  .as-ident .v { font-size: 16px; font-weight: 600; }
+
+  /* Each field: label beside value on wide screens, label ABOVE value when narrow. */
+  .afld { display: grid; grid-template-columns: 200px 1fr; gap: 10px;
+          padding: 8px 4px; border-bottom: 1px solid var(--line); align-items: start; }
+  .afld-label { font-weight: 600; color: var(--muted); font-size: 13px; }
+  .afld-val { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .afld-val .cur { font-size: 15px; }
+  .afld-chk { margin-left: auto; width: 20px; height: 20px; cursor: pointer; flex: none; }
+  /* "update pending" line — its own line, different color. */
+  .afld-pending { flex-basis: 100%; color: #b45309; font-size: 13px; font-weight: 600; }
+  tr.flagged, .afld.flagged { background: #fef2f2; }
+  @media (max-width: 640px) {
+    .afld { grid-template-columns: 1fr; gap: 2px; }
+    .afld-label { font-size: 12px; }
+    /* On small screens: values right-aligned, bold, black, ~1.5× bigger. */
+    .afld-val { justify-content: flex-end; }
+    .afld-val .cur { font-weight: 700; color: #000; font-size: 22px; }
+    .afld-chk { margin-left: 10px; }
+    .afld-pending { text-align: right; }
+  }
+
+  /* Submitted scans table + detail modal. */
+  .scan-list { max-width: 760px; margin: 16px auto 0; }
+  .scan-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .scan-tbl th, .scan-tbl td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
+  .scan-tbl th { font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+  .scan-tag { background:none; border:0; padding:0; color:var(--accent); font-weight:700;
+              font-size:13px; cursor:pointer; text-decoration:underline; }
+  .scan-flag-badge { background:#fef2f2; color:#991b1b; border-radius:999px; padding:1px 8px;
+                     font-size:11px; font-weight:700; }
+  .rec-link { margin-left:6px; text-decoration:none; font-size:14px; cursor:pointer; }
+  .rec-link:hover { filter:brightness(1.1); }
+  .scan-void-btn { background:none; border:0; cursor:pointer; font-size:15px; line-height:1; padding:2px; }
+  .scan-void-btn:disabled { opacity:.4; cursor:not-allowed; }
+  /* A "handled" row: reddened, with its links + the action icon deactivated. */
+  .scan-tbl tr.voided td { background:#fee2e2; }
+  .scan-tbl tr.voided .scan-tag,
+  .scan-tbl tr.voided .rec-link { pointer-events:none; opacity:.55;
+                                  text-decoration:line-through; color:#991b1b; }
+  .scan-tbl tr.voided .scan-void-btn { pointer-events:none; opacity:.5; }
+  /* RF / small screens: only Asset tag + Serial; no modal. */
+  @media (max-width: 640px) {
+    .scan-tbl .only-wide { display:none; }
+    .scan-tag { color:var(--ink); text-decoration:none; pointer-events:none; cursor:default; }
+  }
+  /* Detail modal (wide screens). */
+  .scan-modal { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:2000;
+                display:flex; align-items:center; justify-content:center; }
+  .scan-modal[hidden] { display:none; }
+  .scan-modal-box { background:var(--card,#fff); border-radius:12px; padding:18px;
+                    width:min(520px,92vw); max-height:85vh; overflow:auto;
+                    box-shadow:0 12px 40px rgba(0,0,0,.25); }
+  .scan-modal-box h3 { margin:0 0 4px; font-size:17px; }
+  .scan-modal-box .close-x { float:right; background:none; border:0; font-size:20px;
+                             cursor:pointer; color:var(--muted); line-height:1; }
+  .scan-modal-box table { width:100%; border-collapse:collapse; margin-top:10px; }
+  .scan-modal-box td { padding:4px 6px; border-bottom:1px solid var(--line); font-size:13px; }
+  .scan-modal-box td.k { color:var(--muted); white-space:nowrap; }
+
+  /* Planned audits. */
+  .pa-form { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .pa-grp { border:1px solid var(--line); border-radius:8px; margin-top:6px; padding:6px 10px; }
+  .pa-grp summary { cursor:pointer; font-size:14px; }
+  .pa-grp table { margin-top:6px; }
+  .pa-radio { cursor:pointer; }
+  .pa-tbl { table-layout:fixed; }
+  .pa-tbl td { overflow-wrap:anywhere; vertical-align:middle; }
+  .pa-tbl .pa-res { text-align:center; white-space:nowrap; }
+  .pa-tbl .pa-res label { display:inline-flex; align-items:center; gap:4px; margin:0 6px; }
+  .pa-draft { border:2px dashed #f59e0b; border-radius:10px; padding:10px; margin-top:12px; background:#fffbeb; }
+  .pa-help { width:20px; height:20px; border-radius:50%; border:1px solid var(--line); background:#fff;
+             color:var(--accent); font-size:13px; font-weight:700; line-height:1; cursor:pointer;
+             padding:0; margin-left:6px; vertical-align:middle; }
+  .pa-help:hover { background:#eff6ff; }
+  .pa-help-box { width:min(640px,94vw); font-size:14px; }
+  .pa-help-box h4 { font-size:14px; margin:14px 0 4px; }
+  .pa-help-box p, .pa-help-box ul, .pa-help-box ol { margin:4px 0; }
+  .pa-help-box li { margin:3px 0; }
+  .pa-detail-row[hidden] { display:none; }
+  .pa-detail-row > td { padding:0 0 8px; }
+  .pa-serial { font-size:12px; color:var(--muted); }
+  .pa-plus { border:1px solid var(--line); background:#fff; border-radius:6px; width:22px; height:22px;
+             line-height:1; font-weight:700; cursor:pointer; padding:0; }
+  .pa-plus[hidden] { display:none; }
+  .pa-plus.has { background:#fef2f2; border-color:#fca5a5; color:#991b1b; }
+  .lnk-ico { width:15px; height:15px; vertical-align:middle; margin-left:6px; }
+  .inv-dot { display:inline-block; width:9px; height:9px; border-radius:50%;
+             background:#16a34a; vertical-align:middle; }
+  .inv-dot.bad { background:#dc2626; }
+</style>
+
+<div class="card scan-card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Audit</h1>
+    <span class="muted" id="as-status">Scan a tag or serial…</span>
+  </div>
+  <div style="margin-top:12px;">
+    <label for="ascan">Scan asset tag or serial number</label>
+    <input type="text" id="ascan" class="form-control form-control-lg"
+           placeholder="Scan or type, then Enter" autocomplete="off" autofocus>
+  </div>
+
+  <div id="as-panel" style="display:none; margin-top:14px;">
+    <div class="as-identity" id="as-identity"></div>
+    <a id="as-snow" class="btn secondary small" href="#" target="_blank" rel="noopener"
+       style="display:none; margin-bottom:10px;">Open in ServiceNow ↗</a>
+    <div id="as-intune" style="display:none; margin-bottom:10px;"></div>
+    <p class="muted" style="font-size:13px; margin:0 0 6px;">
+      Tick the box at the end of any value that's a mistake. Pending updates show in
+      <span style="color:#b45309; font-weight:600;">amber</span>. Then Submit.
+    </p>
+    <div id="as-fields"></div>
+    <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
+      <button class="btn" id="as-submit" type="button"
+              {% if not can_write %}disabled title="Unlock to submit"{% endif %}>Submit audit</button>
+      <span id="as-msg" class="muted"></span>
+    </div>
+  </div>
+</div>
+
+<div class="card scan-list" id="planned">
+  <h2 style="margin:0 0 6px; font-size:16px;">Planned audits
+    <button type="button" class="pa-help" id="paHelpOpen" title="How planned audits work" aria-label="Help">?</button></h2>
+  <p class="muted" style="font-size:13px; margin:0 0 8px;">
+    Draws a random sample of all of {{ wh.code|default:"this site" }}'s inventory. Reports are private
+    to whoever drew them and to administrators.
+  </p>
+  {% if messages %}{% for m in messages %}<div class="muted" style="color:{% if m.tags == 'success' %}#166534{% else %}#991b1b{% endif %}; font-size:13px;">{{ m }}</div>{% endfor %}{% endif %}
+  {% if user.is_authenticated %}
+  <form method="post" action="{% url 'planned_audit_create' %}" class="pa-form">
+    {% csrf_token %}
+    <label for="paPercent">Sample %</label>
+    <input type="number" id="paPercent" name="percent" min="1" max="100" value="2" required
+           style="width:80px; padding:6px 8px; border:1px solid var(--line); border-radius:8px;">
+    <button class="btn" type="submit" {% if not can_write %}disabled title="Your account can't create audits"{% endif %}>Create sample</button>
+  </form>
+
+  {% if planned_draft %}
+  <div class="pa-draft">
+    <h3 style="font-size:15px; margin:0 0 4px;">
+      Draft sample — {{ planned_draft.percent }}% · {{ planned_draft.size }} of {{ planned_draft.population }} assets
+      <span class="muted" style="font-weight:400;">(not saved yet{% if planned_draft.excluded %} · {{ planned_draft.excluded }} previously passed excluded{% endif %})</span>
+    </h3>
+    <div style="display:flex; gap:8px; margin:6px 0;">
+      <form method="post" action="{% url 'planned_audit_approve' %}">{% csrf_token %}
+        <button class="btn" type="submit" {% if not can_write %}disabled{% endif %}>Approve audit</button></form>
+      <form method="post" action="{% url 'planned_audit_discard' %}">{% csrf_token %}
+        <button class="btn secondary" type="submit">Discard</button></form>
+    </div>
+    {% for g in planned_draft.groups %}
+    <details class="pa-grp">
+      <summary><strong>{{ g.state }}</strong> — {{ g.rows|length }} asset{{ g.rows|length|pluralize }}</summary>
+      <div style="overflow-x:auto;">
+      <table class="scan-tbl pa-tbl">
+        <colgroup><col style="width:19%"><col style="width:16%"><col style="width:16%"><col style="width:16%">
+          <col style="width:16%"><col style="width:17%"></colgroup>
+        <thead><tr><th>Asset tag / Serial / Category / Display name</th><th>Name</th><th>Station ID</th><th>GL account</th>
+          <th>Location</th><th>Assigned to</th></tr></thead>
+        <tbody>
+          {% for it in g.rows %}
+          <tr>
+            <td>{{ it.asset_tag|default:"—" }}{% if it.snow_url %}<a href="{{ it.snow_url }}" target="_blank"
+                rel="noopener" title="Open in ServiceNow"><img class="lnk-ico" src="{% static 'inventory/snow.jpg' %}"
+                alt="SNOW"></a>{% endif %}
+                <div class="pa-serial">{{ it.serial_number|default:"—" }}</div>
+              <div class="pa-serial">{{ it.model_category|default:"—" }}</div>
+              <div class="pa-serial">{{ it.display_name|default:"—" }}</div></td>
+            <td>{{ it.name|default:"—" }}</td>
+            <td>{{ it.station_id|default:"—" }}</td>
+            <td>{% if "202606" in it.gl_account %}<span class="inv-dot" title="Marked for inventory (GL account 202606)"></span>{% else %}<span class="inv-dot bad" title="Not marked (no 202606 in GL account)"></span>{% endif %} {{ it.gl_account|default:"—" }}</td>
+            <td>{{ it.location|default:"—" }}</td><td>{{ it.assigned_to|default:"—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if planned_audits %}
+  <details class="pa-grp" style="margin-top:10px;"{% if planned_open %} open{% endif %}>
+  <summary><strong>Reports</strong> — {{ planned_audits|length }}</summary>
+  <table class="scan-tbl" style="margin-top:6px;">
+    <thead><tr><th>Report</th><th>Site</th><th>Sample</th><th>Pass</th><th>Fail</th><th>Pending</th><th>Created</th>{% if user.is_staff or user.is_superuser %}<th>By</th><th></th>{% endif %}</tr></thead>
+    <tbody>
+      {% for a in planned_audits %}
+      <tr class="pa-row" data-href="?planned={{ a.pk }}#planned" data-open="{% if planned_open and planned_open.pk == a.pk %}1{% endif %}"
+          title="Click to show / hide this report"{% if planned_open and planned_open.pk == a.pk %} style="background:#eff6ff;"{% endif %}>
+        <td><a href="?planned={{ a.pk }}#planned">{{ a.name|default:a.pk }}</a></td>
+        <td>{{ a.warehouse.code|default:"—" }}</td>
+        <td>{{ a.percent }}% · {{ a.sample_size }}/{{ a.population }}</td>
+        <td{% if planned_open and planned_open.pk == a.pk %} id="paPass"{% endif %}>{{ a.passed }}</td>
+        <td{% if planned_open and planned_open.pk == a.pk %} id="paFail"{% endif %}>{{ a.failed }}</td>
+        <td{% if planned_open and planned_open.pk == a.pk %} id="paPend"{% endif %}>{{ a.pending }}</td>
+        <td>{{ a.created_at|date:"Y-m-d H:i" }}</td>
+        {% if user.is_staff or user.is_superuser %}<td>{{ a.created_by.username|default:"—" }}</td>
+        <td><form method="post" action="{% url 'planned_audit_delete' a.pk %}" style="margin:0;"
+              onsubmit="return confirm('Delete report {{ a.name|default:a.pk }} and all its pass/fail results? This can\'t be undone.');">
+            {% csrf_token %}<button type="submit" class="scan-void-btn" title="Delete this report">🗑</button></form></td>{% endif %}
+      </tr>
+      {% if planned_open and planned_open.pk == a.pk %}
+      <tr class="pa-detail-row"><td colspan="{% if user.is_staff or user.is_superuser %}9{% else %}7{% endif %}">
+        {% include "inventory/_planned_report.html" %}
+      </td></tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  </details>
+  {% else %}
+    <div class="muted" style="margin-top:8px;">No planned audits yet.</div>
+  {% endif %}
+  {% else %}
+    <div class="muted">Sign in to create and view planned audits.</div>
+  {% endif %}
+</div>
+
+<div class="card scan-list">
+  <details>
+  <summary style="cursor:pointer;"><h2 style="display:inline; margin:0; font-size:16px;">Submitted scans</h2>
+    <span class="muted" style="font-size:13px;">— {{ scans|length }}</span></summary>
+  <div style="margin-top:6px;">
+  {% if scans %}
+  <table class="scan-tbl">
+    <thead>
+      <tr>
+        <th>Asset tag</th><th>Serial number</th>
+        <th class="only-wide">Model</th><th class="only-wide">Flagged</th><th class="only-wide">Scanned</th>
+        <th class="only-wide"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in scans %}
+      <tr{% if s.handled %} class="voided"{% endif %}>
+        <td>
+          <button type="button" class="scan-tag" data-i="{{ forloop.counter0 }}">{{ s.asset_tag|default:"—" }}</button>
+          {% if s.asset_tag %}<a class="rec-link" href="{% url 'audit' %}?tag={{ s.asset_tag|urlencode }}&mirror=1"
+             target="_blank" rel="noopener" title="Open in Reconcile (new window) with all fields mirrored">🧩</a>{% endif %}
+        </td>
+        <td>{{ s.serial_number|default:"—" }}</td>
+        <td class="only-wide">{{ s.model|default:"—" }}</td>
+        <td class="only-wide">{% if s.flagged_count %}<span class="scan-flag-badge">{{ s.flagged_count }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+        <td class="only-wide">{{ s.created_at }}</td>
+        <td class="only-wide">
+          <button type="button" class="scan-void-btn" data-url="{% url 'audit_scan_handle' s.pk %}"
+                  {% if s.handled %}disabled title="Already handled"{% elif not can_write %}disabled title="Unlock to mark rows"{% else %}title="Mark this row as handled — reddens it and disables its links (and this icon)"{% endif %}>🚫</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="muted">No scans submitted yet.</div>
+  {% endif %}
+  {{ scans|json_script:"scanData" }}
+  </div>
+  </details>
+</div>
+
+<div id="scanModal" class="scan-modal" hidden>
+  <div class="scan-modal-box">
+    <button type="button" class="close-x" id="scanModalClose" aria-label="Close">×</button>
+    <h3 id="scanModalTitle"></h3>
+    <div id="scanModalMeta" class="muted" style="font-size:13px;"></div>
+    <div id="scanModalBody"></div>
+  </div>
+</div>
+
+<div id="paHelpModal" class="scan-modal" hidden>
+  <div class="scan-modal-box pa-help-box">
+    <button type="button" class="close-x" id="paHelpClose" aria-label="Close">×</button>
+    <h3>Planned audits — how it works</h3>
+
+    <h4>What it does</h4>
+    <p>Draws a random sample of this site's inventory at the percentage you choose, so you can spot-check
+       it and mark each asset <strong>Pass</strong> or <strong>Fail</strong>. Each approved sample is saved as a report.</p>
+
+    <h4>Filters — what is never sampled</h4>
+    <ul>
+      <li>Only the <strong>current site's</strong> assets (the warehouse shown in the navbar).</li>
+      <li>State <strong>Retired</strong>, <strong>Missing</strong> or <strong>In transit</strong>.</li>
+      <li><strong>RF mobiles</strong> (model contains MC930B), in any state.</li>
+      <li><strong>In stock</strong> assets whose Name puts them in a container outside the IT office:
+          <em>IT Storage A/B/D/E/G/H/J…</em> (any “IT Storage” followed by a suffix, including Floor),
+          the bare <em>G</em> or <em>D</em>, <em>Outside Rack</em> and <em>Waste Container</em>.
+          Plain <em>IT Storage</em> is the IT office, so it <strong>is</strong> sampled.</li>
+    </ul>
+    <p><strong>Rotation:</strong> an asset whose latest result in this site's earlier reports is <strong>Pass</strong>
+       is not sampled again. Assets that <strong>failed</strong> (or were never marked) stay eligible, and an
+       asset that failed and later passed counts as passed. Deleting a report removes its results from this check.</p>
+    <p>The sample size is the percentage of what is left, rounded up, and at least 1 asset.</p>
+
+    <h4>Steps</h4>
+    <ol>
+      <li>Enter the <strong>Sample %</strong> (1–100, default 2) and click <strong>Create sample</strong>.
+          This only shows a <strong>draft</strong> (dashed amber box) — nothing is saved yet.</li>
+      <li>Review the draft, then click <strong>Approve audit</strong> to save it as a report, or
+          <strong>Discard</strong> to throw it away. Creating another sample replaces the draft.</li>
+      <li>Open <strong>Reports</strong> and click a report's row to show its sampled assets, grouped by State
+          (each group collapsed). Click the row again to hide it.</li>
+      <li>Mark every asset <strong>Pass</strong> or <strong>Fail</strong>. The choice saves immediately
+          and the Pass / Fail / Pending counts in the row update.</li>
+      <li>Choosing <strong>Fail</strong> opens a comment box. The <strong>+</strong> beside Fail reopens it
+          later (it turns red once a comment exists). Switching back to Pass clears the comment.</li>
+    </ol>
+
+    <h4>What the table shows</h4>
+    <ul>
+      <li><strong>Asset tag</strong> (with a ServiceNow link), and under it the serial number,
+          model category and display name. Rows are sorted by <strong>Name</strong>.</li>
+      <li><strong>Name</strong> (for In stock assets, where the device is), Station ID, GL account,
+          Location and Assigned to.</li>
+      <li><span class="inv-dot"></span> green = GL account contains <strong>202606</strong>;
+          <span class="inv-dot bad"></span> red = it doesn't (including a blank GL account).</li>
+      <li>Values are a snapshot from when the report was approved, so later ServiceNow imports don't change it.</li>
+    </ul>
+
+    <h4>Report names</h4>
+    <p>Named by date, e.g. <strong>20261008</strong>. Further reports the same day become
+       <strong>20261008-1</strong>, <strong>20261008-2</strong>…</p>
+
+    <h4>Who can see and change what</h4>
+    <ul>
+      <li>A report is <strong>private</strong>: only the person who approved it and administrators can see it.</li>
+      <li>Creating, approving and marking results need an account with <strong>edit rights</strong>;
+          without them the radios and buttons are disabled.</li>
+      <li><strong>Administrators</strong> can delete a report (🗑 in the list); this removes its results and comments.</li>
+    </ul>
+  </div>
+</div>
+
+<div id="paModal" class="scan-modal" hidden>
+  <div class="scan-modal-box">
+    <button type="button" class="close-x" id="paClose" aria-label="Close">×</button>
+    <h3 id="paModalTitle">Failure comment</h3>
+    <div class="muted" style="font-size:13px;">Why did this asset fail? (optional)</div>
+    <textarea id="paText" rows="4"
+              style="width:100%; margin-top:10px; padding:8px 10px; font-size:15px;
+                     border:1px solid var(--line); border-radius:8px; resize:vertical;"></textarea>
+    <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+      <button type="button" class="btn secondary" id="paCancel">Close</button>
+      <button type="button" class="btn" id="paSave">Save comment</button>
+    </div>
+  </div>
+</div>
+
+<div id="cmtModal" class="scan-modal" hidden>
+  <div class="scan-modal-box">
+    <button type="button" class="close-x" id="cmtClose" aria-label="Close">×</button>
+    <h3>Add a comment</h3>
+    <div class="muted" style="font-size:13px;">Optional — details to help whoever makes the fix.</div>
+    <textarea id="cmtText" rows="4"
+              style="width:100%; margin-top:10px; padding:8px 10px; font-size:15px;
+                     border:1px solid var(--line); border-radius:8px; resize:vertical;"></textarea>
+    <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+      <button type="button" class="btn secondary" id="cmtCancel">Cancel</button>
+      <button type="button" class="btn" id="cmtSubmit">Submit audit</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const CSRF = "{{ csrf_token }}";
+  const LOOKUP_URL = "{% url 'audit_lookup' %}";
+  const SAVE_URL = "{% url 'audit_scan_save' %}";
+  const LOCKED = {{ can_write|yesno:"false,true" }};
+  const $ = function (s) { return document.querySelector(s); };
+  let current = null;
+
+  function esc(s) { return (s == null ? "" : String(s)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function norm(v) { return (v || "").trim().toLowerCase(); }
+
+  // --- Scan feedback sounds (synthesized, no audio files) -------------------
+  // positive = GL account has the 202606 marker; negative = found but no marker;
+  // notfound = no asset matched. The AudioContext is created on the first scan
+  // (a user gesture), which browsers require to allow sound.
+  let audioCtx = null;
+  function beep(freqs, type, step) {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      let t = audioCtx.currentTime;
+      freqs.forEach(function (f) {
+        const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+        osc.type = type; osc.frequency.value = f;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + step);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(t); osc.stop(t + step);
+        t += step;
+      });
+    } catch (e) { /* audio unsupported — silent */ }
+  }
+  function playTone(kind) {
+    if (kind === "positive") beep([880, 1318.5], "sine", 0.14);      // pleasant two-note rise
+    else if (kind === "negative") beep([220, 165], "square", 0.22);  // low descending buzz
+    else beep([523.25, 392, 523.25], "triangle", 0.10);              // notfound — neutral trill
+  }
+
+  // Tint the scan box by the asset's GL account: green if it contains 202606,
+  // red if it has a different value, no background when empty / no asset loaded.
+  function setGlBackground(value) {
+    const scan = $("#ascan");
+    const v = (value || "").trim();
+    scan.classList.remove("gl-ok", "gl-bad");
+    if (!v) return;
+    scan.classList.add(v.includes("202606") ? "gl-ok" : "gl-bad");
+  }
+
+  async function lookup(q) {
+    $("#as-status").textContent = "Looking up…";
+    const r = await fetch(LOOKUP_URL + "?tag=" + encodeURIComponent(q));
+    const data = await r.json();
+    if (!data.found) {
+      setGlBackground("");
+      playTone("notfound");
+      $("#as-status").innerHTML = "<span style='color:#991b1b'>No asset found for “" + esc(q) + "”.</span>";
+      $("#as-panel").style.display = "none";
+      current = null;
+      return;
+    }
+    current = data;
+    $("#as-identity").innerHTML = data.identity.map(function (i) {
+      return "<div class='as-ident'><div class='l'>" + esc(i.label) + "</div><div class='v'>" + (esc(i.value) || "—") + "</div></div>";
+    }).join("");
+    const snow = $("#as-snow");
+    if (data.snow_url) { snow.href = data.snow_url; snow.style.display = "inline-block"; } else { snow.style.display = "none"; }
+    const intuneBox = $("#as-intune");
+    if (data.intune) {
+      let pillClass = "unexpected", pillText = "Not in Intune";
+      if (data.intune.in_intune) {
+        if (data.intune.compliance === "Compliant") { pillClass = "match"; pillText = "Compliant"; }
+        else if (data.intune.compliance === "Noncompliant") { pillClass = "missing"; pillText = "Noncompliant"; }
+        else if (data.intune.compliance) { pillClass = "mismatch"; pillText = data.intune.compliance; }
+        else { pillClass = "mismatch"; pillText = "In Intune"; }
+      }
+      intuneBox.innerHTML = '<span class="pill ' + pillClass + '">' + esc(pillText) + '</span>' +
+        (data.intune.assigned_to
+          ? ' <span class="muted">Assigned to (Intune): ' + esc(data.intune.assigned_to) + '</span>'
+          : '');
+      intuneBox.style.display = "block";
+    } else {
+      intuneBox.style.display = "none";
+      intuneBox.innerHTML = "";
+    }
+    $("#as-fields").innerHTML = data.fields.map(function (f) {
+      const pending = (f.expected && norm(f.expected) !== norm(f.current))
+        ? '<div class="afld-pending">⟳ Pending update → ' + (esc(f.expected) || "(blank)") + '</div>' : '';
+      return '<div class="afld" data-field="' + esc(f.field) + '">' +
+        '<div class="afld-label">' + esc(f.label) + '</div>' +
+        '<div class="afld-val"><span class="cur">' + (esc(f.current) || "—") + '</span>' +
+        '<input type="checkbox" class="afld-chk" title="Mark as a mistake">' + pending + '</div></div>';
+    }).join("");
+    $("#as-fields").querySelectorAll(".afld-chk").forEach(function (cb) {
+      cb.addEventListener("change", function () { cb.closest(".afld").classList.toggle("flagged", cb.checked); });
+    });
+    const glField = data.fields.find(function (f) { return f.field === "gl_account"; });
+    setGlBackground(glField ? glField.current : "");
+    // Positive if the GL account carries the 202606 marker, negative otherwise.
+    playTone((glField && (glField.current || "").includes("202606")) ? "positive" : "negative");
+    $("#as-panel").style.display = "block";
+    $("#as-msg").textContent = "";
+    let msg = "Loaded <strong>" + (esc(data.identity[0].value) || "(no tag)") + "</strong>.";
+    if (data.match_count > 1) msg += " <span style='color:var(--amber)'>(" + data.match_count + " share this; showing nearest for this site.)</span>";
+    // Same global-lookup warning as the Reconcile page: the scanned device may
+    // belong to the other warehouse, and that is worth flagging, not hiding.
+    if (data.off_site) {
+      msg += " <span style='color:#991b1b;font-weight:600'>⚠ Not at " +
+             esc(data.site_code || "this site") + "</span>";
+    }
+    $("#as-status").innerHTML = msg;
+  }
+
+  $("#ascan").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); const t = this.value.trim(); if (t) { lookup(t); this.select(); } }
+  });
+
+  // Submit opens a comment modal first; the modal's button does the actual save.
+  $("#as-submit").addEventListener("click", function () {
+    if (LOCKED || !current) return;
+    $("#cmtText").value = "";
+    $("#cmtModal").hidden = false;
+    $("#cmtText").focus();
+  });
+  function closeCmt() { $("#cmtModal").hidden = true; }
+  $("#cmtCancel").addEventListener("click", closeCmt);
+  $("#cmtClose").addEventListener("click", closeCmt);
+  $("#cmtModal").addEventListener("click", function (e) { if (e.target === this) closeCmt(); });
+
+  $("#cmtSubmit").addEventListener("click", function () {
+    if (LOCKED || !current) return;
+    const flagged = {};
+    $("#as-fields").querySelectorAll(".afld").forEach(function (row) {
+      const cb = row.querySelector(".afld-chk");
+      if (cb && cb.checked) {
+        const cur = row.querySelector(".cur").textContent.trim();
+        flagged[row.dataset.field] = (cur === "—") ? "" : cur;
+      }
+    });
+    const comment = $("#cmtText").value.trim();
+    const btn = $("#cmtSubmit"); btn.disabled = true;
+    $("#as-msg").textContent = "Saving…";
+    fetch(SAVE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+      body: JSON.stringify({ asset_id: current.asset_id, flagged: flagged, comment: comment }),
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      btn.disabled = false;
+      if (data.ok) {
+        const n = Object.keys(flagged).length;
+        closeCmt();
+        $("#as-panel").style.display = "none";
+        current = null;
+        const scan = $("#ascan"); scan.value = ""; setGlBackground(""); scan.focus();
+        $("#as-status").innerHTML = "<span style='color:var(--green)'>Audit saved — " + n +
+          " field(s) flagged" + (comment ? " + comment" : "") + ". Ready for the next scan.</span>";
+      } else {
+        $("#as-msg").innerHTML = "<span style='color:#991b1b'>" + (data.error || "Save failed") + "</span>";
+      }
+    }).catch(function () { btn.disabled = false; $("#as-msg").innerHTML = "<span style='color:#991b1b'>Save failed</span>"; });
+  });
+
+  // Submitted-scans detail modal (wide screens; disabled on RF via CSS pointer-events).
+  (function () {
+    const el = document.getElementById("scanData");
+    if (!el) return;
+    let DATA = [];
+    try { DATA = JSON.parse(el.textContent || "[]"); } catch (e) {}
+    const modal = $("#scanModal");
+    if (!modal) return;
+    function openScan(i) {
+      const s = DATA[i];
+      if (!s) return;
+      $("#scanModalTitle").textContent = s.asset_tag || "(no tag)";
+      const meta = [];
+      if (s.serial_number) meta.push("Serial: " + s.serial_number);
+      if (s.model) meta.push("Model: " + s.model);
+      if (s.name) meta.push(s.name);
+      if (s.location) meta.push(s.location);
+      if (s.state) meta.push(s.state);
+      meta.push("Scanned " + (s.created_at || ""));
+      $("#scanModalMeta").textContent = meta.join(" · ");
+      let body;
+      if (s.flagged && s.flagged.length) {
+        body = '<p style="margin:12px 0 4px; font-weight:600;">Flagged as a mistake:</p><table>';
+        s.flagged.forEach(function (f) {
+          body += '<tr><td class="k">' + esc(f.label) + '</td><td>' + (esc(f.value) || "—") + '</td></tr>';
+        });
+        body += '</table>';
+      } else {
+        body = '<p class="muted" style="margin-top:12px;">No fields were flagged (recorded as reviewed).</p>';
+      }
+      if (s.comment) {
+        body += '<p style="margin:14px 0 4px; font-weight:600;">Comment:</p>' +
+                '<div style="white-space:pre-wrap; font-size:13px; background:#f8fafc;' +
+                ' border:1px solid var(--line); border-radius:8px; padding:8px 10px;">' + esc(s.comment) + '</div>';
+      }
+      $("#scanModalBody").innerHTML = body;
+      modal.hidden = false;
+    }
+    function closeScan() { modal.hidden = true; }
+    document.querySelectorAll(".scan-tag").forEach(function (b) {
+      b.addEventListener("click", function () { openScan(parseInt(b.dataset.i, 10)); });
+    });
+    $("#scanModalClose").addEventListener("click", closeScan);
+    modal.addEventListener("click", function (e) { if (e.target === modal) closeScan(); });
+  })();
+
+  // Planned audits help modal.
+  $("#paHelpOpen").addEventListener("click", function () { $("#paHelpModal").hidden = false; });
+  $("#paHelpClose").addEventListener("click", function () { $("#paHelpModal").hidden = true; });
+  $("#paHelpModal").addEventListener("click", function (e) { if (e.target === this) this.hidden = true; });
+
+  // Planned audits list: clicking a report's row shows its table right under it
+  // (loads the report), and clicking the open one again hides / re-shows it.
+  document.querySelectorAll(".pa-row").forEach(function (tr) {
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", function (e) {
+      if (e.target.closest("a, button, form, input")) return;
+      if (tr.dataset.open) {
+        const detail = tr.nextElementSibling;
+        if (detail && detail.classList.contains("pa-detail-row")) detail.hidden = !detail.hidden;
+      } else {
+        window.location.href = tr.dataset.href;
+      }
+    });
+  });
+
+  // Planned audits: a pass/fail radio saves immediately; group + report tallies follow.
+  // Choosing Fail opens the comment modal; the "+" beside it reopens it later.
+  let paBtn = null;
+  function paOpen(btn) {
+    paBtn = btn;
+    $("#paModalTitle").textContent = "Failure comment" + (btn.dataset.tag ? " — " + btn.dataset.tag : "");
+    $("#paText").value = btn.dataset.comment || "";
+    $("#paText").readOnly = LOCKED;
+    $("#paSave").style.display = LOCKED ? "none" : "";
+    $("#paModal").hidden = false;
+    $("#paText").focus();
+  }
+  function paClose() { $("#paModal").hidden = true; paBtn = null; }
+  $("#paClose").addEventListener("click", paClose);
+  $("#paCancel").addEventListener("click", paClose);
+  $("#paModal").addEventListener("click", function (e) { if (e.target === this) paClose(); });
+  $("#paSave").addEventListener("click", function () {
+    if (LOCKED || !paBtn) return;
+    const btn = paBtn, text = $("#paText").value.trim();
+    fetch(btn.dataset.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+      body: JSON.stringify({ result: "fail", comment: text }),
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (!data.ok) throw new Error(data.error || "save failed");
+      btn.dataset.comment = data.comment;
+      btn.classList.toggle("has", !!data.comment);
+      paClose();
+    }).catch(function () { alert("Couldn't save that comment — reload and try again."); });
+  });
+  document.querySelectorAll(".pa-plus").forEach(function (b) {
+    b.addEventListener("click", function () { paOpen(b); });
+  });
+
+  document.querySelectorAll(".pa-radio").forEach(function (rb) {
+    rb.addEventListener("change", function () {
+      fetch(rb.dataset.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+        body: JSON.stringify({ result: rb.value }),
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (!data.ok) throw new Error(data.error || "save failed");
+        const plus = rb.closest("td").querySelector(".pa-plus");
+        plus.hidden = rb.value !== "fail";
+        plus.dataset.comment = data.comment || "";
+        plus.classList.toggle("has", !!data.comment);
+        if (rb.value === "fail") paOpen(plus);
+        const p = $("#paPass"), f = $("#paFail"), n = $("#paPend");
+        if (p) p.textContent = data.passed;
+        if (f) f.textContent = data.failed;
+        if (n) n.textContent = data.total - data.passed - data.failed;
+        const grp = rb.closest(".pa-grp");
+        grp.querySelector(".pa-g-pass").textContent = grp.querySelectorAll('.pa-radio[value="pass"]:checked').length;
+        grp.querySelector(".pa-g-fail").textContent = grp.querySelectorAll('.pa-radio[value="fail"]:checked').length;
+      }).catch(function () {
+        alert("Couldn't save that result — reload and try again.");
+      });
+    });
+  });
+
+  // Mark a submitted row as "handled" (unlocked only): persist it on the AuditScan,
+  // then redden the row + deactivate its links AND this action icon (one-way).
+  document.querySelectorAll(".scan-void-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (LOCKED || btn.disabled || !btn.dataset.url) return;
+      const tr = btn.closest("tr");
+      btn.disabled = true;   // optimistic; reverted if the save fails
+      fetch(btn.dataset.url, { method: "POST", headers: { "X-CSRFToken": CSRF } })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.ok) { if (tr) tr.classList.add("voided"); }
+          else { btn.disabled = false; }
+        })
+        .catch(function () { btn.disabled = false; });
+    });
+  });
+</script>
+{% endblock %}

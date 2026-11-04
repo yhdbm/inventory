@@ -1,0 +1,164 @@
+{% comment %}Donut + category/Station ID/state breakdown for one bundle `b`
+(e.g. active vs all). Collapse groups are class-based so it can render twice.{% endcomment %}
+<div style="display:flex; gap:20px; align-items:center; justify-content:center; margin-top:8px;">
+  <div style="position:relative;">
+    <div class="donut"
+         style="background: conic-gradient(var(--green) 0 {{ b.marked_pct }}%, #cbd5e1 {{ b.marked_pct }}% 100%);"></div>
+    <div class="donut-hole">
+      <span class="pct">{{ b.marked_pct }}%</span>
+      <span class="lbl">inventoried</span>
+    </div>
+  </div>
+  <div>
+    <div class="legend-row"><span class="swatch" style="background:var(--green);"></span>
+      Inventoried: <strong>{{ b.marked_assets }}</strong></div>
+    <div class="legend-row"><span class="swatch" style="background:#cbd5e1;"></span>
+      Pending: <strong>{{ b.unmarked_assets }}</strong></div>
+  </div>
+</div>
+
+<p class="muted" style="margin:18px 0 -2px; font-size:12px;">
+  Tip: click the <strong style="color:var(--accent)">blue</strong> part of a bar to open all matching
+  assets in ServiceNow, or the <strong style="color:#b45309">amber</strong> part for only those still
+  missing the 202606 inventory mark.
+</p>
+
+<div style="display:flex; gap:24px; align-items:flex-start; margin-top:20px;">
+  <div class="cat-panel">
+    <h3>Inventoried by model category</h3>
+    {% for c in b.category_inventoried %}
+      <div class="cat-row" data-url="{{ c.url }}" data-url-pending="{{ c.url_pending }}">
+        <span class="cat-name">{{ c.category }}</span>
+        <div class="cat-line">
+          <div class="cat-bar">
+            <span class="cat-seg blue" style="width:{% widthratio c.inventoried c.total 100 %}%"
+                  title="{{ c.inventoried }} inventoried — open all in ServiceNow"></span>
+            <span class="cat-seg pend" title="{{ c.pending_n }} not inventoried — open the unmarked list"></span>
+          </div>
+          <span class="cat-count">{{ c.inventoried }} / {{ c.total }}</span>
+        </div>
+      </div>
+    {% endfor %}
+    {% if b.category_none %}
+      <div class="cat-group"><span class="caret"></span>
+        Not inventoried — {{ b.category_none|length }} categor{{ b.category_none|length|pluralize:"y,ies" }}</div>
+      <div class="cat-none" hidden>
+        {% for c in b.category_none %}
+          <div class="cat-row" data-url="{{ c.url }}" data-url-pending="{{ c.url_pending }}">
+            <span class="cat-name">{{ c.category }}</span>
+            <div class="cat-line">
+              <div class="cat-bar">
+                <span class="cat-seg blue" style="width:{% widthratio c.inventoried c.total 100 %}%"></span>
+                <span class="cat-seg pend" title="{{ c.pending_n }} not inventoried — open the unmarked list"></span>
+              </div>
+              <span class="cat-count">0 / {{ c.total }}</span>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if not b.category_inventoried and not b.category_none %}<div class="muted">No assets.</div>{% endif %}
+  </div>
+
+  <div class="cat-panel">
+    <h3>Inventoried by Station ID</h3>
+    {% for s in b.station_inventoried %}
+      <div class="cat-row" data-url="{{ s.url }}" data-url-pending="{{ s.url_pending }}">
+        <span class="cat-name">{{ s.station }}</span>
+        <div class="cat-line">
+          <div class="cat-bar">
+            <span class="cat-seg blue" style="width:{% widthratio s.inventoried s.total 100 %}%"
+                  title="{{ s.inventoried }} inventoried — open all in ServiceNow"></span>
+            <span class="cat-seg pend" title="{{ s.pending_n }} not inventoried — open the unmarked list"></span>
+          </div>
+          <span class="cat-count">{{ s.inventoried }} / {{ s.total }}</span>
+        </div>
+      </div>
+    {% endfor %}
+    {% if b.station_none %}
+      <div class="cat-group"><span class="caret"></span>
+        Not inventoried — {{ b.station_none|length }} station{{ b.station_none|length|pluralize }}</div>
+      <div class="cat-none" hidden>
+        {% for s in b.station_none %}
+          <div class="cat-row" data-url="{{ s.url }}" data-url-pending="{{ s.url_pending }}">
+            <span class="cat-name">{{ s.station }}</span>
+            <div class="cat-line">
+              <div class="cat-bar">
+                <span class="cat-seg blue" style="width:{% widthratio s.inventoried s.total 100 %}%"></span>
+                <span class="cat-seg pend" title="{{ s.pending_n }} not inventoried — open the unmarked list"></span>
+              </div>
+              <span class="cat-count">0 / {{ s.total }}</span>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if not b.station_inventoried and not b.station_none %}<div class="muted">No assets.</div>{% endif %}
+  </div>
+
+  <div class="cat-panel">
+    <h3>Inventoried by state</h3>
+    {% for s in b.state_inventoried %}
+      <div class="cat-row" data-url="{{ s.url }}" data-url-pending="{{ s.url_pending }}">
+        <span class="cat-name">{{ s.state }}</span>
+        <div class="cat-line">
+          <div class="cat-bar">
+            <span class="cat-seg blue" style="width:{% widthratio s.inventoried s.total 100 %}%"
+                  title="{{ s.inventoried }} inventoried — open all in ServiceNow"></span>
+            <span class="cat-seg pend" title="{{ s.pending_n }} not inventoried — open the unmarked list"></span>
+          </div>
+          <span class="cat-count">{{ s.inventoried }} / {{ s.total }}</span>
+        </div>
+      </div>
+    {% endfor %}
+    {% if b.state_none %}
+      <div class="cat-group"><span class="caret"></span>
+        Not inventoried — {{ b.state_none|length }} state{{ b.state_none|length|pluralize }}</div>
+      <div class="cat-none" hidden>
+        {% for s in b.state_none %}
+          <div class="cat-row" data-url="{{ s.url }}" data-url-pending="{{ s.url_pending }}">
+            <span class="cat-name">{{ s.state }}</span>
+            <div class="cat-line">
+              <div class="cat-bar">
+                <span class="cat-seg blue" style="width:{% widthratio s.inventoried s.total 100 %}%"></span>
+                <span class="cat-seg pend" title="{{ s.pending_n }} not inventoried — open the unmarked list"></span>
+              </div>
+              <span class="cat-count">0 / {{ s.total }}</span>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if b.retired_state %}
+      <div class="cat-row cat-retired" data-url="{{ b.retired_state.url }}" data-url-pending="{{ b.retired_state.url_pending }}">
+        <span class="cat-name">{{ b.retired_state.state }}</span>
+        <div class="cat-line">
+          <div class="cat-bar">
+            <span class="cat-seg blue" style="width:{% widthratio b.retired_state.inventoried b.retired_state.total 100 %}%"
+                  title="{{ b.retired_state.inventoried }} inventoried — open all in ServiceNow"></span>
+            <span class="cat-seg pend" title="{{ b.retired_state.pending_n }} not inventoried — open the unmarked list"></span>
+          </div>
+          <span class="cat-count">{{ b.retired_state.inventoried }} / {{ b.retired_state.total }}</span>
+        </div>
+      </div>
+      {% if b.retired_state.substates %}
+        <div class="cat-substates">
+          {% for sub in b.retired_state.substates %}
+            <div class="cat-row cat-sub" data-url="{{ sub.url }}" data-url-pending="{{ sub.url_pending }}">
+              <span class="cat-name">{{ sub.substate }}</span>
+              <div class="cat-line">
+                <div class="cat-bar">
+                  <span class="cat-seg blue" style="width:{% widthratio sub.inventoried sub.total 100 %}%"
+                        title="{{ sub.inventoried }} inventoried — open all in ServiceNow"></span>
+                  <span class="cat-seg pend" title="{{ sub.pending_n }} not inventoried — open the unmarked list"></span>
+                </div>
+                <span class="cat-count">{{ sub.inventoried }} / {{ sub.total }}</span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endif %}
+    {% if not b.state_inventoried and not b.state_none and not b.retired_state %}<div class="muted">No assets.</div>{% endif %}
+  </div>
+</div>

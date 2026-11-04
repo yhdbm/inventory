@@ -1,0 +1,188 @@
+{
+  "activeTaskType": "bulk",
+  "bulkProjects": [
+    {
+      "id": "bulk-default-project",
+      "name": "GL Update Project",
+      "rules": [
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "GL account",
+          "id": "bulk-rule-gl-account",
+          "value": "202606"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "Station ID",
+          "id": "ba25d7ec-6d2e-4104-85b5-57dc0db89943",
+          "value": ""
+        },
+        {
+          "behavior": "autocomplete_legacy_first",
+          "enabled": true,
+          "headerText": "Location",
+          "id": "9bb6210d-f350-4cec-a41e-2bca12a1bd6b",
+          "value": "US_MS_Lakeside Rd"
+        },
+        {
+          "behavior": "autocomplete_legacy_first",
+          "enabled": false,
+          "headerText": "State",
+          "id": "2b632946-43bc-4acb-89e9-81fe01349f58",
+          "value": "In stock"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "Name",
+          "id": "ad48b7b1-cf8b-4fe0-81dc-ab4884452a74",
+          "value": ""
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": false,
+          "headerText": "Assigned to",
+          "id": "d0c50493-5606-4785-bd6a-abfd2e9465b4",
+          "value": ""
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": false,
+          "headerText": "Managed by",
+          "id": "064908ce-b050-4be6-bef8-a33180851bf2",
+          "value": ""
+        },
+        {
+          "behavior": "autocomplete_legacy_first",
+          "enabled": true,
+          "headerText": "Department",
+          "id": "8479307b-1574-4b6b-b578-18b1fd3cfdd0",
+          "value": "Tech-Operations and Support"
+        }
+      ]
+    },
+    {
+      "id": "99f9ce34-58a2-4b82-baf6-034ef3a101ef",
+      "name": "Neat",
+      "rules": [
+        {
+          "id": "74ad292e-78e7-40ba-be7a-5646e3543cdb",
+          "headerText": "GL account",
+          "value": "202606",
+          "behavior": "direct_replace",
+          "enabled": true
+        },
+        {
+          "id": "3ca01467-5b81-4b7e-86b7-8958ccb50ae0",
+          "headerText": "Station ID",
+          "value": "WH1|IT",
+          "behavior": "direct_replace",
+          "enabled": true
+        },
+        {
+          "id": "5e887699-a7f2-4f0d-8a36-150e5176e094",
+          "headerText": "Location",
+          "value": "US_MS_Cedarport CPT",
+          "behavior": "autocomplete_legacy_first",
+          "enabled": true
+        },
+        {
+          "id": "fb86741c-4bbc-4e3b-a425-8ba9d5e9556c",
+          "headerText": "Name",
+          "value": "Waste Container",
+          "behavior": "direct_replace",
+          "enabled": true
+        },
+        {
+          "id": "0e4900ec-542f-488a-a538-61c0f0116aa4",
+          "headerText": "Department",
+          "value": "Tech-Operations and Support",
+          "behavior": "autocomplete_legacy_first",
+          "enabled": true
+        },
+        {
+          "id": "ffad9303-8a82-4f03-ae0d-70342651de10",
+          "headerText": "State",
+          "value": "Retired",
+          "behavior": "autocomplete_legacy_first",
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "bulkSelectedProjectId": "99f9ce34-58a2-4b82-baf6-034ef3a101ef",
+  "surgicalProjects": [
+    {
+      "id": "surgical-default-project",
+      "name": "Computer 20260528",
+      "rules": [
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "Station ID",
+          "id": "surgical-rule-display-name",
+          "value": "WH1|IT"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "PO number",
+          "id": "surgical-rule-location",
+          "value": "PO100000-1"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "Model category",
+          "id": "46fdc6ca-a2bf-4533-8caa-287b372751b0",
+          "value": "Computer"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "Model",
+          "id": "aac37e7a-b645-48ea-bccd-99ae73a5cb63",
+          "value": "Pro Micro QCM1250"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "State",
+          "id": "6600bebf-179d-4136-b68a-84d7f6794fb9",
+          "value": "In stock"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "Department",
+          "id": "7effac8c-e67e-4865-99fe-f85cb8dafe7e",
+          "value": "Tech-Operations and Support"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "Name",
+          "id": "03d2e8ed-ead9-4066-81b6-052a9b9e11ba",
+          "value": "IT Storage"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "Stockroom",
+          "id": "48cbe949-659e-44e2-8573-c51e934d1397",
+          "value": "WH1 - IT Storage"
+        },
+        {
+          "behavior": "direct_replace",
+          "enabled": true,
+          "headerText": "GL account",
+          "id": "85f79db1-e513-4570-a9d2-9528b3b4a2d2",
+          "value": "202606"
+        }
+      ]
+    }
+  ],
+  "surgicalSelectedProjectId": "surgical-default-project"
+}

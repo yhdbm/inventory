@@ -1,0 +1,10 @@
+asset_tag,field,label,current,expected,status
+,,,,,pending
+000061975,state,State,In use,Retired,pending
+000061975,location,Location,MX_Zenpro Mexico Office,US_MS_Cedarport CPT,pending
+000004049,location,Location,Mississippi - Remote,US_MS_Cedarport CPT,pending
+000057959,state,State,In stock,Retired,pending
+000057959,location,Location,US_MS_Cedarport CPT,US_MS_Cedarport Annex,pending
+000069573,station_id,Station ID,IT office,Cubicle 09,pending
+000076157,station_id,Station ID,WH1|Maintenance,Cubicle 09,pending
+000078712,,,,,pending

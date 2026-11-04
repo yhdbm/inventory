@@ -1,0 +1,740 @@
+{% extends "inventory/base.html" %}
+{% block title %}Reconcile{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <h1 style="margin:0;">Reconcile</h1>
+    <span class="muted">
+      <span id="pending-count">{{ pending_count }}</span> pending corrections ·
+      <a href="{% url 'corrections_list' %}">view / export →</a>
+    </span>
+  </div>
+  <div style="margin-top:14px; display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+    <div style="flex:1; min-width:260px;">
+      <label>Scan asset tag <span class="muted" style="font-weight:400;">(or serial number)</span></label>
+      <input type="text" id="scan" class="form-control form-control-lg"
+             placeholder="Scan or type an asset tag — or a serial number — then Enter"
+             autocomplete="off" autofocus>
+    </div>
+    <div><button class="btn secondary" id="scan-btn" type="button">Look up</button></div>
+  </div>
+  <div id="scan-msg" class="muted" style="margin-top:8px;"></div>
+</div>
+
+<div class="card">
+  <div id="left-empty" class="muted">Scan an asset tag to load its details.</div>
+
+  <div id="panel" style="display:none;">
+    <div id="identity" class="identity"></div>
+    <div style="margin-top:10px;">
+      <a id="snow-link" class="btn secondary small" href="#" target="_blank"
+         rel="noopener" style="display:none;">Open in ServiceNow ↗</a>
+    </div>
+
+    <p class="muted" style="margin:14px 0 6px;">
+      Each field is <strong>“same as current”</strong> by default. Uncheck a row to
+      enter the correct expected value — that row turns red and is saved as a correction.
+      Leave it <strong>blank to clear/delete</strong> the value.
+    </p>
+
+    <div class="mirror-bar">
+      <label title="Select / deselect all — mirrors Expected values with current values">
+        <input type="checkbox" id="same-all" class="form-check-input" checked>
+        Mirror all expected values to current
+      </label>
+    </div>
+
+    <div class="audit-cols">
+      <table class="audit-table">
+        <tbody>
+          {% for f in field_options_left %}{% include "inventory/_audit_field_row.html" %}{% endfor %}
+        </tbody>
+      </table>
+      <table class="audit-table">
+        <tbody>
+          {% for f in field_options_right %}{% include "inventory/_audit_field_row.html" %}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:14px; display:flex; gap:8px; align-items:center;">
+      <button class="btn" id="save-btn" type="button" disabled>Save correction</button>
+      <button class="btn danger" id="clear-btn" type="button" disabled>Clear all</button>
+      <span id="match-note" class="muted"></span>
+    </div>
+    <div id="save-msg" class="muted" style="margin-top:8px;"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin:0 0 6px;">Notes</h2>
+  <p class="muted" style="margin:0 0 10px;">
+    Area notes (e.g. “asset tags missing in this area”). These also show on the
+    Corrections page and are kept separate from corrections — the
+    “Delete all pending” button won’t remove them.
+  </p>
+  <form method="post" action="{% url 'note_add' %}" style="margin-bottom:14px;">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{% url 'audit' %}">
+    <textarea name="text" rows="2" placeholder="Add a note…"
+              style="width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:7px; font-size:14px;"
+              {% if not can_write %}disabled{% endif %}></textarea>
+    <div style="margin-top:8px;">
+      <button class="btn" type="submit"
+              {% if not can_write %}disabled{% endif %}>Add note</button>
+    </div>
+  </form>
+  {% for n in notes %}
+    <div class="note-row">
+      <div>
+        <span class="muted" style="font-size:12px;">{{ n.created_at|date:"Y-m-d H:i" }}</span>
+        <div>{{ n.text|linebreaksbr }}</div>
+      </div>
+      <form method="post" action="{% url 'note_delete' n.pk %}" class="inline-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{% url 'audit' %}">
+        <button class="btn danger small" type="submit"
+                {% if not can_write %}disabled{% endif %}>Delete</button>
+      </form>
+    </div>
+  {% empty %}
+    <div class="muted">No notes yet.</div>
+  {% endfor %}
+</div>
+
+<style>
+  /* Two tables side by side so the field list is half as tall (less scrolling).
+     Stacks back to one column on narrow screens. */
+  .audit-cols { display:flex; gap:24px; align-items:flex-start; }
+  .audit-cols > .audit-table { flex:1; min-width:0; }
+  @media (max-width: 900px) { .audit-cols { flex-direction:column; gap:0; } }
+  .exp-wrap { display:flex; align-items:center; gap:6px; }
+  .exp-wrap .exp { flex:1; }
+  .copy-btn { background:none; border:0; cursor:pointer; font-size:15px; padding:2px 4px;
+              opacity:.7; line-height:1; }
+  .copy-btn:hover { opacity:1; }
+  .note-row { display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+              padding:8px 0; border-top:1px solid var(--line); }
+  .note-row:first-of-type { border-top:0; }
+  .identity { display:flex; gap:18px; flex-wrap:wrap; }
+  .identity .ident { background: var(--bg); border:1px solid var(--line);
+                     border-radius:8px; padding:8px 12px; }
+  .identity .ident .l { font-size:11px; color:var(--muted); text-transform:uppercase; }
+  .identity .ident .v { font-size:16px; font-weight:600; }
+  /* Each field is one full-width row: label on top, then Current + Expected
+     side by side (the old "Field" column is gone, so the value columns are wide). */
+  .mirror-bar { margin:4px 0 10px; }
+  .mirror-bar label { display:inline-flex; align-items:center; gap:8px; font-size:13px;
+                      color:var(--muted); cursor:pointer; }
+  .audit-table { width:100%; }
+  .audit-table td.afld-cell { vertical-align:top; padding:8px 6px;
+                              border-bottom:1px solid var(--line); }
+  .afld-cell .fname { color:var(--ink); font-weight:600; font-size:14px; margin-bottom:5px; }
+  .afld-vals { display:grid; grid-template-columns:1fr 26px 1fr; gap:10px; align-items:start; }
+  .afld-col { min-width:0; }
+  .afld-sub { font-size:10px; text-transform:uppercase; letter-spacing:.04em;
+              color:var(--muted); margin-bottom:2px; }
+  .afld-mid { display:flex; align-items:center; justify-content:center; padding-top:16px; }
+  .afld-cell .cur { font-size:14px; word-break:break-word; }
+  .audit-table .exp { width:100%; }
+  .audit-table .same { width:18px; height:18px; }
+  .audit-table .exp.locked { background:#f1f5f9; color:var(--muted); }
+  tr.mismatch .cur { background:#fee2e2; color:#991b1b; font-weight:600;
+                     border-radius:4px; padding:0 4px; }
+  tr.mismatch .fname { color:#991b1b; }
+  /* Comments + printer sub-rows are shown only for printers (toggled in JS). */
+  tr[data-field="comments"] { display:none; }
+  .printer-sub { display:none; background:#f8fafc; }
+  .printer-sub .fname { font-weight:500; color:var(--muted); font-size:13px; }
+  .printer-sub .sub-cur { font-size:13px; color:var(--ink); }
+  .sub-keyinput { width:130px; padding:4px 7px; border:1px solid var(--line);
+                  border-radius:6px; font-size:13px; }
+  #scan { font-size:18px; padding:12px; }
+  /* GL-account signal on the scan box: green if GL account contains 202606,
+     red if it has a different value, no background if empty. */
+  #scan.gl-ok  { background:#d1f0d8; }
+  #scan.gl-bad { background:#f8d2d2; }
+</style>
+
+<script>
+  const CSRF = "{{ csrf_token }}";
+  const URLS = {
+    lookup: "{% url 'audit_lookup' %}",
+    save: "{% url 'audit_save' %}",
+    clear: "{% url 'audit_clear' %}",
+  };
+  let current = null;  // last looked-up asset payload
+  let gembaApplied = false;  // did the GEMBA rule override GL/Disposal for the loaded asset?
+  // 🧩 deep-link special case: mirror-all is temporary — remember the previous
+  // selection so it's restored once the correction is saved.
+  let specialMirror = false, savedMirrorSnapshot = null;
+
+  const $ = (s) => document.querySelector(s);
+  const expInputs = () => document.querySelectorAll('.exp');
+  const expFor = (field) => document.querySelector('.exp[data-field="' + field + '"]');
+  const curFor = (field) => {
+    if (!current) return "";
+    const f = current.fields.find((x) => x.field === field);
+    return f ? f.current : "";
+  };
+
+  function norm(v) { return (v || "").trim().toLowerCase(); }
+
+  // Reflect a checkbox state onto its expected input.
+  function applySame(field, checked, doFocus) {
+    const inp = expFor(field);
+    if (!inp) return;
+    if (checked) {
+      inp.value = curFor(field);   // mirror current
+      inp.readOnly = true;
+      inp.classList.add('locked');
+    } else {
+      inp.value = "";              // clear, wait for user input
+      inp.readOnly = false;
+      inp.classList.remove('locked');
+      if (doFocus) inp.focus();
+    }
+  }
+
+  // Keep the header "all" checkbox in sync with the individual checkboxes.
+  function syncSameAll() {
+    const all = document.getElementById('same-all');
+    const boxes = Array.prototype.slice.call(document.querySelectorAll('.same'));
+    const checked = boxes.filter(function (b) { return b.checked; }).length;
+    all.checked = checked === boxes.length;
+    all.indeterminate = checked > 0 && checked < boxes.length;
+  }
+
+  function recompute() {
+    if (!current) return;
+    let mismatches = 0;
+    current.fields.forEach(function (f) {
+      const row = document.querySelector('tr[data-field="' + f.field + '"]');
+      // Comments is only in play for printers; never flag it otherwise.
+      if (f.field === 'comments' && !commentActive()) { if (row) row.classList.remove('mismatch'); return; }
+      const box = document.querySelector('.same[data-field="' + f.field + '"]');
+      const inp = expFor(f.field);
+      const expected = inp ? inp.value.trim() : "";
+      // A row differs when it's an override (unchecked) and the expected value
+      // isn't the same as current — including an empty expected, which means
+      // "clear/delete the value".
+      const isOverride = box && !box.checked;
+      const bad = isOverride && norm(expected) !== norm(f.current);
+      if (bad) mismatches++;
+      if (row) row.classList.toggle('mismatch', bad);
+    });
+    const note = $('#match-note');
+    if (mismatches === 0) note.innerHTML = "<span style='color:var(--green)'>All fields match current.</span>";
+    else note.innerHTML = "<strong style='color:#991b1b'>" + mismatches + " field(s) differ</strong> — saved as a correction.";
+  }
+
+  // --- Scan feedback sounds (synthesized, no audio files) -------------------
+  // positive = GL account has the 202606 marker; negative = found but no marker;
+  // notfound = no asset matched. AudioContext is created on the first scan gesture.
+  let audioCtx = null;
+  function beep(freqs, type, step) {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      let t = audioCtx.currentTime;
+      freqs.forEach(function (f) {
+        const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+        osc.type = type; osc.frequency.value = f;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + step);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(t); osc.stop(t + step);
+        t += step;
+      });
+    } catch (e) { /* audio unsupported — silent */ }
+  }
+  function playTone(kind) {
+    if (kind === "positive") beep([880, 1318.5], "sine", 0.14);      // pleasant two-note rise
+    else if (kind === "negative") beep([220, 165], "square", 0.22);  // low descending buzz
+    else beep([523.25, 392, 523.25], "triangle", 0.10);              // notfound — neutral trill
+  }
+
+  // Tint the scan box by the asset's GL account: green if it contains 202606,
+  // red if it has a different value, no background when empty / no asset loaded.
+  function setGlBackground(value) {
+    const scan = $('#scan');
+    const v = (value || "").trim();
+    scan.classList.remove('gl-ok', 'gl-bad');
+    if (!v) return;
+    scan.classList.add(v.includes('202606') ? 'gl-ok' : 'gl-bad');
+  }
+
+  // GEMBA rule: when the GL account expected value contains "GEMBA", move that
+  // value into the Disposal reason expected input, then set GL account to the
+  // 202606 inventory marker. Both become overrides (their "Same" box is
+  // unchecked) so they save as a correction. Setting GL to 202606 removes the
+  // GEMBA substring, so this can't loop.
+  // Undo a PREVIOUS asset's GEMBA override only. If the last scan triggered the
+  // rule, re-mirror GL account + Disposal reason to the new asset's current values
+  // so "202606"/the disposal value don't carry over. When the rule wasn't applied,
+  // do nothing — so a manually unchecked GL account row keeps its state across scans.
+  function resetGembaFields() {
+    if (!gembaApplied) return;
+    gembaApplied = false;
+    ['gl_account', 'disposal_reason'].forEach(function (f) {
+      const box = document.querySelector('.same[data-field="' + f + '"]');
+      if (box) box.checked = true;
+      applySame(f, true, false);   // mirror current + lock
+    });
+    syncSameAll(); saveMirrorState();
+  }
+
+  function applyGembaRule() {
+    const glInp = expFor('gl_account');
+    if (!glInp) return;
+    // Detect on the asset's CURRENT GL account (not the editable expected value).
+    const val = (curFor('gl_account') || '').trim();
+    if (!/gemba/i.test(val)) return;
+    gembaApplied = true;
+    const drInp = expFor('disposal_reason');
+    if (drInp) {
+      const drBox = document.querySelector('.same[data-field="disposal_reason"]');
+      if (drBox && drBox.checked) drBox.checked = false;
+      drInp.readOnly = false; drInp.classList.remove('locked');
+      drInp.value = val;                 // copy the GEMBA value found
+    }
+    const glBox = document.querySelector('.same[data-field="gl_account"]');
+    if (glBox && glBox.checked) glBox.checked = false;
+    glInp.readOnly = false; glInp.classList.remove('locked');
+    glInp.value = '202606';              // stamp the inventory marker
+    syncSameAll(); saveMirrorState(); recompute();
+  }
+
+  async function lookup(tag) {
+    $('#scan-msg').textContent = "Looking up…";
+    const r = await fetch(URLS.lookup + "?tag=" + encodeURIComponent(tag));
+    const data = await r.json();
+    if (!data.found) {
+      setGlBackground("");
+      playTone("notfound");
+      $('#scan-msg').innerHTML = "<span style='color:#991b1b'>No asset found for “" + tag + "”.</span>";
+      return;
+    }
+    current = data;
+    $('#identity').innerHTML = data.identity.map(function (i) {
+      return "<div class='ident'><div class='l'>" + i.label + "</div><div class='v'>" +
+             (i.value || "—") + "</div></div>";
+    }).join("");
+    data.fields.forEach(function (f) {
+      const cell = document.getElementById('cur_' + f.field);
+      if (cell) cell.textContent = f.current || "—";
+      const box = document.querySelector('.same[data-field="' + f.field + '"]');
+      // Keep the checkmark state from the previous scan. Checked rows mirror
+      // the new current value; unchecked rows keep their expected value.
+      if (box && box.checked) applySame(f.field, true);
+    });
+    const glField = data.fields.find(function (f) { return f.field === 'gl_account'; });
+    setGlBackground(glField ? glField.current : "");
+    // Positive if the GL account carries the 202606 marker, negative otherwise.
+    playTone((glField && (glField.current || "").includes("202606")) ? "positive" : "negative");
+    $('#left-empty').style.display = 'none';
+    $('#panel').style.display = 'block';
+    $('#save-btn').disabled = false;
+    $('#clear-btn').disabled = false;
+    const snow = $('#snow-link');
+    if (data.snow_url) { snow.href = data.snow_url; snow.style.display = 'inline-block'; }
+    else { snow.style.display = 'none'; }
+    let msg = "Loaded <strong>" + (data.identity[0].value || "(no tag)") + "</strong>.";
+    if (data.match_count > 1) msg += " <span style='color:var(--amber)'>(" + data.match_count + " rows share this tag; showing the nearest match for this site.)</span>";
+    // The lookup is deliberately global, so a scanned device can turn out to
+    // belong to the other warehouse. Say so loudly rather than quietly auditing
+    // it as ours — a device filed at the wrong site is itself worth correcting.
+    if (data.off_site) {
+      msg += " <span style='color:#991b1b;font-weight:600'>⚠ Not at " +
+             (data.site_code || "this site") +
+             " — check its Station ID / Location before saving.</span>";
+    }
+    $('#scan-msg').innerHTML = msg;
+    refreshPrinterSection();
+    resetGembaFields();   // clear any prior asset's GL / Disposal override
+    applyGembaRule();     // then auto-handle a GEMBA GL account on this asset
+    recompute();
+  }
+
+  async function save() {
+    if (!current) return;
+    // Send fields whose checkbox is unchecked (a real override) and whose value
+    // actually differs from current. An empty value is sent on purpose — it
+    // records a "clear/delete this field" correction.
+    const expected = {};
+    document.querySelectorAll('.same').forEach(function (box) {
+      if (box.checked) return;
+      const field = box.dataset.field;
+      if (field === 'comments' && !commentActive()) return;  // comments only for printers/phones
+      const inp = expFor(field);
+      const val = inp ? inp.value.trim() : "";
+      if (norm(val) !== norm(curFor(field))) expected[field] = val;
+    });
+    const r = await fetch(URLS.save, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+      body: JSON.stringify({ asset_id: current.asset_id, expected: expected }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      $('#pending-count').textContent = data.pending_count;
+      const tag = current.identity[0].value || "(no tag)";
+      const changed = data.change_count;
+      clearSubForms();     // clear Number / printer sub-fields for the next asset
+      resetWorkstation();  // clears the panel + scan box and refocuses for next scan
+      restorePreviousMirror();  // undo the 🧩 mirror-all, if this was that special case
+      $('#scan-msg').innerHTML = "<span style='color:var(--green)'>Saved correction for <strong>" +
+        tag + "</strong> — " + changed + " difference(s) recorded. Ready for the next scan.</span>";
+    } else {
+      $('#save-msg').innerHTML = "<span style='color:#991b1b'>" + (data.error || "Save failed") + "</span>";
+    }
+  }
+
+  // Keep the panels visible; only clear the current-values side, then put the
+  // cursor back on the scan box for the next item.
+  function resetWorkstation() {
+    document.querySelectorAll('.cur').forEach(function (c) { c.textContent = ""; });
+    $('#identity').innerHTML = "";  // asset tag / serial / display name
+    document.querySelectorAll('tr[data-field]').forEach(function (row) {
+      row.classList.remove('mismatch');
+    });
+    $('#match-note').innerHTML = "";
+    $('#save-msg').textContent = "";
+    $('#save-btn').disabled = true;
+    $('#clear-btn').disabled = true;
+    $('#snow-link').style.display = "none";
+    current = null;
+    const scan = $('#scan');
+    scan.value = "";
+    setGlBackground("");
+    scan.focus();
+  }
+
+  async function clearAll() {
+    // Reset everything to "same as current".
+    document.querySelectorAll('.same').forEach(function (box) {
+      box.checked = true;
+      applySame(box.dataset.field, true, false);
+    });
+    clearSubForms();   // also clear the structured Comments sub-fields + Comments value
+    recompute();
+    if (current) {
+      const r = await fetch(URLS.clear, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+        body: JSON.stringify({ asset_id: current.asset_id }),
+      });
+      const data = await r.json();
+      if (data.ok) $('#pending-count').textContent = data.pending_count;
+    }
+    $('#save-msg').textContent = "Cleared — all fields reset to current.";
+  }
+
+  $('#scan').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); const t = this.value.trim(); if (t) { lookup(t); this.select(); } }
+  });
+  $('#scan-btn').addEventListener('click', function () {
+    const t = $('#scan').value.trim(); if (t) lookup(t);
+  });
+  $('#save-btn').addEventListener('click', save);
+  $('#clear-btn').addEventListener('click', clearAll);
+
+  // --- Persist the mirror (Same) selection AND expected values in the browser
+  const MIRROR_KEY = "auditMirrorState";
+
+  function saveMirrorState() {
+    const state = {};
+    document.querySelectorAll('.same').forEach(function (b) {
+      const inp = expFor(b.dataset.field);
+      state[b.dataset.field] = { checked: b.checked, value: inp ? inp.value : "" };
+    });
+    try { localStorage.setItem(MIRROR_KEY, JSON.stringify(state)); } catch (e) {}
+  }
+
+  function loadMirrorState() {
+    let state = {};
+    try { state = JSON.parse(localStorage.getItem(MIRROR_KEY) || "{}"); } catch (e) {}
+    document.querySelectorAll('.same').forEach(function (b) {
+      const s = state[b.dataset.field];
+      if (s && typeof s === 'object') {
+        b.checked = !!s.checked;
+        if (b.checked) {
+          applySame(b.dataset.field, true, false);   // mirror current
+        } else {
+          const inp = expFor(b.dataset.field);        // restore typed value
+          if (inp) { inp.value = s.value || ""; inp.readOnly = false; inp.classList.remove('locked'); }
+        }
+      } else {
+        applySame(b.dataset.field, b.checked, false);
+      }
+    });
+    syncSameAll();
+  }
+
+  document.querySelectorAll('.same').forEach(function (box) {
+    box.addEventListener('change', function () {
+      applySame(this.dataset.field, this.checked, true);
+      syncSameAll();
+      saveMirrorState();
+      recompute();
+    });
+  });
+
+  // Select / deselect all in the "Same" column.
+  document.getElementById('same-all').addEventListener('change', function () {
+    const checked = this.checked;
+    this.indeterminate = false;
+    document.querySelectorAll('.same').forEach(function (box) {
+      box.checked = checked;
+      applySame(box.dataset.field, checked, false);
+    });
+    saveMirrorState();
+    recompute();
+  });
+
+  expInputs().forEach(function (inp) {
+    inp.addEventListener('input', function () { saveMirrorState(); recompute(); });
+  });
+
+  // Fire the GEMBA rule when the GL account expected value is typed/pasted too.
+  (function () {
+    const glExp = expFor('gl_account');
+    if (glExp) glExp.addEventListener('input', applyGembaRule);
+  })();
+
+  // Copy the expected value to the clipboard and uncheck the row's "Same" box,
+  // keeping the value in place. Works on http LAN origins via a textarea fallback.
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(function () { fallbackCopy(text); });
+    } else { fallbackCopy(text); }
+  }
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var field = this.dataset.field;
+      var inp = expFor(field);
+      if (!inp) return;
+      copyText(inp.value);
+      var box = document.querySelector('.same[data-field="' + field + '"]');
+      if (box && box.checked) {                 // uncheck without clearing the value
+        box.checked = false;
+        inp.readOnly = false;
+        inp.classList.remove('locked');
+      }
+      syncSameAll();
+      saveMirrorState();
+      recompute();
+      var b = this; var orig = b.textContent;   // brief "copied" feedback
+      b.textContent = '✓'; setTimeout(function () { b.textContent = orig; }, 900);
+    });
+  });
+
+  // --- Structured Comments editor for printers AND phones -------------------
+  // Printer: IP / FMS / FMS 2 / DMS / Service ID (+ custom). Phone: Number
+  // (formatted xxx-xxx-xxxx). Sub-row values compile into "KEY: value /…" as the
+  // Comments expected; sub-row current cells are parsed back from it.
+  const PRINTER_KEYS = ["IP", "FMS", "FMS 2", "DMS", "Service ID", "FEDEX", "UPS", "Windows Queue"];
+  const PHONE_KEYS = ["Number"];
+  const SUB_PLACEHOLDERS = { "Number": "xxx-xxx-xxxx" };
+
+  function parseCommentsStr(str) {
+    const map = {};
+    (str || "").split('/').forEach(function (part) {
+      const i = part.indexOf(':');
+      if (i > -1) {
+        const k = part.slice(0, i).trim();
+        const v = part.slice(i + 1).trim();
+        if (k) map[k.toLowerCase()] = { key: k, value: v };
+      }
+    });
+    return map;
+  }
+  function getCurrentComments() {
+    if (!current) return "";
+    const f = current.fields.find(function (x) { return x.field === 'comments'; });
+    return f ? f.current : "";
+  }
+  function commentCategory() {
+    let cat = "";
+    if (current) {
+      const f = current.fields.find(function (x) { return x.field === 'model_category'; });
+      cat = f ? f.current : "";
+    }
+    cat = (cat || "").toLowerCase();
+    if (cat.indexOf('printer') > -1) return 'printer';
+    if (cat.indexOf('phone') > -1) return 'phone';
+    return null;
+  }
+  function commentKeys() {
+    const c = commentCategory();
+    return c === 'printer' ? PRINTER_KEYS : (c === 'phone' ? PHONE_KEYS : []);
+  }
+  function commentActive() { return commentCategory() !== null; }
+
+  function subRowHTML(key, custom) {
+    const label = custom
+      ? '<input class="sub-keyinput" placeholder="Field name" value="' + (key || '') + '">'
+      : '↳ ' + key;
+    const ph = custom ? 'Value…' : (SUB_PLACEHOLDERS[key] || (key + '…'));
+    return '<tr class="printer-sub sub-data" data-key="' + (key || '') + '">' +
+      '<td class="afld-cell">' +
+        '<div class="fname">' + label + '</div>' +
+        '<div class="afld-vals">' +
+          '<div class="afld-col"><div class="afld-sub">Current</div>' +
+            '<div class="cur sub-cur" data-key="' + (key || '') + '">—</div></div>' +
+          '<div class="afld-mid"></div>' +
+          '<div class="afld-col"><div class="afld-sub">Expected</div>' +
+            '<input class="exp form-control form-control-sm sub-exp" data-key="' + (key || '') +
+            '" placeholder="' + ph + '"></div>' +
+        '</div>' +
+      '</td></tr>';
+  }
+  // (Re)build the sub-rows for the current asset's category (rebuilds on change).
+  function buildSubRows() {
+    const commentsRow = document.querySelector('tr[data-field="comments"]');
+    if (!commentsRow) return;
+    const keys = commentKeys();
+    const sig = commentCategory() + ':' + keys.join('|');
+    if (commentsRow.dataset.subSig === sig) return;
+    document.querySelectorAll('.printer-sub').forEach(function (r) { r.remove(); });
+    commentsRow.dataset.subSig = sig;
+    if (!keys.length) return;
+    let html = keys.map(function (k) { return subRowHTML(k, false); }).join('');
+    if (commentCategory() === 'printer') {
+      html += '<tr class="printer-sub sub-add"><td class="afld-cell">' +
+        '<button type="button" class="btn secondary small" id="addSubBtn">+ Add field</button></td></tr>';
+    }
+    commentsRow.insertAdjacentHTML('afterend', html);
+    const addBtn = document.getElementById('addSubBtn');
+    if (addBtn) addBtn.addEventListener('click', function () {
+      document.querySelector('.printer-sub.sub-add')
+        .insertAdjacentHTML('beforebegin', subRowHTML('', true));
+      refreshVisibility();
+    });
+  }
+  function compileComments() {
+    const parts = [];
+    document.querySelectorAll('.sub-exp').forEach(function (inp) {
+      const key = (inp.dataset.key || '').trim();
+      const val = inp.value.trim();
+      if (key && val) parts.push(key + ': ' + val);
+    });
+    return parts.join(' / ');
+  }
+  function applyCompiledToComments() {
+    const inp = expFor('comments');
+    if (!inp) return;
+    const box = document.querySelector('.same[data-field="comments"]');
+    if (box && box.checked) { box.checked = false; inp.readOnly = false; inp.classList.remove('locked'); }
+    inp.value = compileComments();
+    syncSameAll(); saveMirrorState(); recompute();
+  }
+  function fillSubCurrents() {
+    const map = parseCommentsStr(getCurrentComments());
+    document.querySelectorAll('.sub-cur').forEach(function (td) {
+      const k = (td.dataset.key || '').trim().toLowerCase();
+      td.textContent = (k && map[k]) ? map[k].value : '—';
+    });
+  }
+  function refreshVisibility() {
+    const on = commentActive();
+    const cr = document.querySelector('tr[data-field="comments"]');
+    if (cr) cr.style.display = on ? 'table-row' : 'none';
+    document.querySelectorAll('.printer-sub').forEach(function (r) {
+      r.style.display = on ? 'table-row' : 'none';
+    });
+    return on;
+  }
+  function refreshPrinterSection() {
+    buildSubRows();
+    if (!refreshVisibility()) return;
+    fillSubCurrents();
+    // Seed sub-row expected values from the current Comments expected string.
+    const inp = expFor('comments');
+    const map = parseCommentsStr(inp ? inp.value : "");
+    document.querySelectorAll('.sub-exp').forEach(function (se) {
+      const k = (se.dataset.key || '').trim().toLowerCase();
+      se.value = (k && map[k]) ? map[k].value : "";
+    });
+  }
+  // After Save, clear the sub-fields + Comments so the next asset starts fresh.
+  function clearSubForms() {
+    document.querySelectorAll('.sub-exp').forEach(function (inp) { inp.value = ''; });
+    const c = expFor('comments');
+    const box = document.querySelector('.same[data-field="comments"]');
+    if (box) box.checked = true;
+    if (c) { c.value = ''; c.readOnly = true; c.classList.add('locked'); }
+    syncSameAll(); saveMirrorState();
+  }
+  // Delegated input handling for the sub-rows (covers dynamically-added rows).
+  // Bound to the wrapper so it works regardless of which of the two tables the
+  // comments row (and its injected sub-rows) lives in.
+  document.querySelector('.audit-cols').addEventListener('input', function (e) {
+    if (e.target.classList.contains('sub-exp')) {
+      applyCompiledToComments();
+    } else if (e.target.classList.contains('sub-keyinput')) {
+      const tr = e.target.closest('tr');
+      const key = e.target.value.trim();
+      tr.dataset.key = key;
+      const exp = tr.querySelector('.sub-exp'); if (exp) exp.dataset.key = key;
+      const cur = tr.querySelector('.sub-cur'); if (cur) cur.dataset.key = key;
+      fillSubCurrents(); applyCompiledToComments();
+    }
+  });
+
+  // Restore the saved mirror selection + expected values on page load, and
+  // always show the panel (with the Expected value column) right away — even
+  // before a scan — so the restored expected values are visible.
+  loadMirrorState();
+  refreshPrinterSection();
+  $('#left-empty').style.display = 'none';
+  $('#panel').style.display = 'block';
+
+  // Restore the mirror selection that was in effect before the 🧩 special case,
+  // then re-apply it. Called after a correction is saved in that mode.
+  function restorePreviousMirror() {
+    if (!specialMirror) return;
+    specialMirror = false;
+    try {
+      if (savedMirrorSnapshot === null) localStorage.removeItem(MIRROR_KEY);
+      else localStorage.setItem(MIRROR_KEY, savedMirrorSnapshot);
+    } catch (e) {}
+    savedMirrorSnapshot = null;
+    loadMirrorState();   // re-apply the previous checkbox / expected selection
+    // Drop the query params so a reload won't re-enter mirror-all mode.
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }
+
+  // Deep link from the Printers page (🧩): ?tag=<asset tag>&mirror=1 — mirror ALL
+  // fields to current (so nothing is flagged) and look the asset up, so the user
+  // only unchecks/tweaks the few values that are wrong. The mirror-all is temporary:
+  // the previous selection is restored once the correction is saved.
+  (function initFromQuery() {
+    const params = new URLSearchParams(window.location.search);
+    const tag = params.get('tag');
+    if (!tag) return;
+    if (params.get('mirror') === '1') {
+      try { savedMirrorSnapshot = localStorage.getItem(MIRROR_KEY); } catch (e) { savedMirrorSnapshot = null; }
+      specialMirror = true;
+      document.querySelectorAll('.same').forEach(function (b) { b.checked = true; });
+      const all = document.getElementById('same-all');
+      if (all) { all.checked = true; all.indeterminate = false; }
+      saveMirrorState();
+    }
+    const scan = $('#scan');
+    if (scan) scan.value = tag;
+    lookup(tag);   // mirrors current into every checked (=all) expected input
+  })();
+</script>
+{% endblock %}

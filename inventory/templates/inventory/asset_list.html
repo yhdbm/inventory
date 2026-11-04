@@ -1,0 +1,155 @@
+{% extends "inventory/base.html" %}
+{% block title %}Imported assets{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+    <h1 style="margin:0;">Imported assets</h1>
+    <span class="muted">{{ grand_total }} rows imported</span>
+  </div>
+
+  <form method="get" style="margin-top:14px;">
+    <div style="margin-bottom:14px;">
+      <label>Search</label>
+      <input type="text" name="q" value="{{ query }}"
+             placeholder="asset tag, serial, model, assigned to…">
+    </div>
+
+    <div style="display:flex; gap:14px; flex-wrap:wrap;">
+      {% for f in filters %}
+      <div class="filter-panel" style="flex:1; min-width:240px;">
+        <details {% if f.selected %}open{% endif %}>
+          <summary>
+            <strong>{{ f.label }}</strong>
+            <span class="muted">({{ f.available }} available{% if f.selected_count %}
+              · {{ f.selected_count }} selected{% endif %})</span>
+          </summary>
+          <div class="fp-tools">
+            <input type="text" class="f-search" placeholder="Filter {{ f.label|lower }}…"
+                   autocomplete="off">
+            <button type="button" class="btn secondary small f-clear">Clear</button>
+          </div>
+          <div class="f-list">
+            {% for v in f.pinned %}
+            <label class="f-item pinned">
+              <input type="checkbox" name="{{ f.key }}" value="{{ v }}"
+                     {% if v in f.selected %}checked{% endif %}>
+              <span>★ {{ v }}</span>
+            </label>
+            {% endfor %}
+            {% if f.pinned and f.rest %}
+            <div class="f-divider">— all options —</div>
+            {% endif %}
+            {% for v in f.rest %}
+            <label class="f-item">
+              <input type="checkbox" name="{{ f.key }}" value="{{ v }}"
+                     {% if v in f.selected %}checked{% endif %}>
+              <span>{{ v }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </details>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div style="margin-top:14px;">
+      <button class="btn" type="submit">Apply filters</button>
+      <a class="btn secondary" href="{% url 'asset_list' %}">Reset</a>
+    </div>
+  </form>
+</div>
+
+<style>
+  .filter-panel details { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  .filter-panel summary { cursor: pointer; font-size: 13px; }
+  .fp-tools { display: flex; gap: 8px; margin: 10px 0; }
+  .fp-tools input { flex: 1; }
+  .f-list { max-height: 240px; overflow-y: auto; border: 1px solid var(--line);
+            border-radius: 7px; padding: 6px; }
+  .f-item { display: flex; align-items: center; gap: 7px; font-weight: 400;
+            font-size: 13px; padding: 3px 4px; margin: 0; }
+  .f-item input { width: auto; }
+  .f-item.pinned span { color: var(--accent); font-weight: 600; }
+  .f-item.hidden { display: none; }
+  .f-divider { font-size: 11px; color: var(--muted); text-transform: uppercase;
+               letter-spacing: .04em; padding: 8px 4px 4px; border-top: 1px dashed var(--line);
+               margin-top: 4px; }
+  .f-divider.hidden { display: none; }
+</style>
+
+<script>
+  document.querySelectorAll('.filter-panel').forEach(function (panel) {
+    var search = panel.querySelector('.f-search');
+    var list = panel.querySelector('.f-list');
+    var clear = panel.querySelector('.f-clear');
+    if (search && list) {
+      search.addEventListener('input', function () {
+        var term = this.value.toLowerCase();
+        list.querySelectorAll('.f-item').forEach(function (item) {
+          item.classList.toggle('hidden', term && item.textContent.toLowerCase().indexOf(term) === -1);
+        });
+        // Hide the divider while actively searching.
+        var div = list.querySelector('.f-divider');
+        if (div) div.classList.toggle('hidden', !!term);
+      });
+    }
+    if (clear && list) {
+      clear.addEventListener('click', function () {
+        list.querySelectorAll('input[type=checkbox]').forEach(function (cb) { cb.checked = false; });
+      });
+    }
+  });
+</script>
+
+<div class="card">
+  <p class="muted" style="margin-top:0;">
+    {{ total }} matching · showing page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+  </p>
+  <div style="overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>Asset tag</th><th>Serial number</th><th>Display name</th><th>Category</th>
+        <th>Model</th><th>Manufacturer</th><th>State</th><th>Location</th>
+        <th>GL account</th><th>Assigned to</th><th>Tab</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in page_obj %}
+      <tr>
+        <td><strong>{{ a.asset_tag|default:"—" }}</strong></td>
+        <td>{{ a.serial_number|default:"—" }}</td>
+        <td>{{ a.display_name|default:"—" }}</td>
+        <td>{{ a.model_category|default:"—" }}</td>
+        <td>{{ a.model|default:"—" }}</td>
+        <td>{{ a.manufacturer|default:"—" }}</td>
+        <td>{{ a.state|default:"—" }}</td>
+        <td>{{ a.location|default:"—" }}</td>
+        <td>{{ a.gl_account|default:"—" }}</td>
+        <td>{{ a.assigned_to|default:"—" }}</td>
+        <td class="muted">{{ a.source_tab }}</td>
+        <td><a href="{% url 'asset_detail' a.pk %}">View →</a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="12" class="muted">No assets match your filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    {% if page_obj.has_previous %}
+      <a class="btn secondary small" href="?{% if querystring %}{{ querystring }}&{% endif %}page=1">« First</a>
+      <a class="btn secondary small" href="?{% if querystring %}{{ querystring }}&{% endif %}page={{ page_obj.previous_page_number }}">‹ Prev</a>
+    {% endif %}
+    <span class="muted">Page {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+      <a class="btn secondary small" href="?{% if querystring %}{{ querystring }}&{% endif %}page={{ page_obj.next_page_number }}">Next ›</a>
+      <a class="btn secondary small" href="?{% if querystring %}{{ querystring }}&{% endif %}page={{ page_obj.paginator.num_pages }}">Last »</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
